@@ -1,0 +1,10 @@
+{
+    "studentID":"studentid",
+    "examID":"examID",
+    "examVersion":"v1",
+    "answers":{
+        "question1":"A",
+        "question2":"B",
+        "question3":"C"
+        }
+}
