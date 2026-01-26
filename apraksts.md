@@ -1,8 +1,8 @@
 # Idejas apraksts (max 500 vārdi)
-bla bla bla blu blu blu
-Kas ir šis projekts
-Minimāli kam un kāpēc
-Kā šis noderīgs mums
+Mūsu projekts ir AIZO (Atklātās Inženierzinātņu Olimpiādes) papīra formāta darbu automātiska labošana. Šī programma ir domāta testa atbilžu labošanai, ar papildus lauku labošanu, kā piemēram atbildes, kur skolēns ieraksta kādu skaitli.
+Lai izmantotu programmu, autorizēts lietotājs iesniegtu attēlus ar darbiem mājaslapā, attēli nonāk līdz serverim, kur no tiem tiek iegūtas atzīmētās atbildes, kas tiek salīdzinātas ar pareizajām atbildēm. Attiecīgā skolēna atbildes un punkti tiek reģistrēti datubāzē, kur vēlāk no tās tos var iegūt, lai viegli varētu izveidot skolēna koda un iegūto punktu pa priekšmetiem tabulu, kas tiks publicēta mājaslapā. Pareizās atbildes tiek iegūtas ieskenējot lapu, kurā tās ir atzīmētas.
+Atbilžu lapu formāts būtu tests, kurā pareizās atbildes atsevišķā atbilžu lapā atzīmē ar aplīti. Lauki, kuros skolēns ieraksta atbildi būtu atsevišķas kastītes.<br>
+Šis projekts tiek izstrādāts, jo pašreizējais darbu labošanas veids ir laikietilpīgs un skolotājiem netīkams. Izstrādājot šo darbu mazāk laika tiks patērēts labojot darbus, kā rezultātā skolotāji varēs vairāk laiku veltīt uzdevumu izveidei, vai arī citu skolas darbu labošanai. Arī olimpiādes pildītājiem šis ļaus iegūt papildus statistiku, aplūkojot iegūtos punktus pa priekšmetiem, neuzliekot papildus slogu skolotājiem, jo šī statistika tiks iegūta automātiski.
 # Problēmas analīze (min 100, max 300 vārdi) - mērķauditorija/lietotāji; kāpēc vērts risinājumu izstrādāt
 Mūsu mērķauditorija ir Inženierzinātņu vidusskolas skolotāji un pastarpināti arī AIZO pildītāji. No vairākiem skolotājiem ir dzirdēts, cik kaitinoši un laikietiplīgi ir izlabot visus AIZO darbus. Tieši tāpēc arī tiek izstrādāts šis risinājums. Mūsu produkts atvieglos šo AIZO darbu labošanu, kā arī ļaus skolēniem apskatīties papildus statistiku par saviem darbiem, piemēram, atsevišķi punktus pa priekšmetiem, kā matemātika, fizika un ķīmija. 
 Ar mūsu risinājumu darbus varēs ar vairākām ierīcēm vienlaicīgi ieskenēt, un cilvēki, kas skenēs pat varēs nebūt skolotāji, bet gan skolēni. Papildus, varēs arī izsekot līdzi, vai kāds darbs nav pazudis, kā piemēram, bija dzirdēts stāsts, ka jau kādu laiku pēc olimpiādes starp formulu lapām tika atrastas trīs atbilžu lapas.
