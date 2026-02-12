@@ -30,3 +30,15 @@ Ar mūsu risinājumu darbus varēs ar vairākām ierīcēm vienlaicīgi ieskenē
 | 06.02-12.03 | Rihards un Mathers: Gala produkta sagatavošana (docker), dokumentācijas pabeigšana|
 # Piegādes formāts
 Lietotājiem tā būs mājaslapa, kur augšuplādē sākotnēji darbu ar pareizajām atbildēm un tad veiktos darbus. Augšuplādetā informācija tiks procesētu lai automātiski izlabotu visus darbus un publicētu rezultātus
+
+
+# Patstāvīgais darbs, funkcionālās un nefunkcionālās prasības
+### Rihards Bukovskis
+##### Funkcionālās prasības:
+- Pareizās atbilžu lapas var iesniegt tikai autorizēti lietotāji
+- Ja MI labotājs nespēj nolasīt atbildi, tam ir jāatgriež lietotājam kļūda un jāliek lietotājam pašam ievadīt atbildi
+- Autorizētiem lietotājiem ir jāspēj pārskatīt lietotāju iegūtos punktus
+##### Nefunkcionālās prasības
+- Pat ja lietotājs vienlaicīgi iesniedz vairākus attēlus, backend labošanai būtu jāspēj visi apstrādāt
+- Katrs darbs ir jāizlabo 2 sekunžu laikā backendam
+- Lietotāju UI ir jābūt intuitīvai, lai procesu padarītu ērtāku un samazinātu kļūdu iespējamību
