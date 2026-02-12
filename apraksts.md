@@ -44,12 +44,12 @@ Lietotājiem tā būs mājaslapa, kur augšuplādē sākotnēji darbu ar pareiza
 - Lietotāju UI ir jābūt intuitīvai, lai procesu padarītu ērtāku un samazinātu kļūdu iespējamību
 
 
-###Edvards Mathers
+### Edvards Mathers
 ##### Funckionālās prasības:
--Sistēma ļauj augšuplādēt pareizās atbildes un tās atpazīst no pārejiem pildītajiem darbiem
--Sistēma ļauj vienlaicīgi augšuplādēt vairākas bildes 
--Sistēmai jāspēj atpazīt, kura atbilde ir atzīmēta testā un skaitliski ievadīti skaitļi
+- Sistēma ļauj augšuplādēt pareizās atbildes un tās atpazīst no pārejiem pildītajiem darbiem
+- Sistēma ļauj vienlaicīgi augšuplādēt vairākas bildes 
+- Sistēmai jāspēj atpazīt, kura atbilde ir atzīmēta testā un skaitliski ievadīti skaitļi
 ##### Nefunkcionālās prasības:
--Atbilžu detektēšanai un labošanai jābut uzticamai, lai manuāla pārbaude ir nepieciešama tikai retos gadījumos.
--Serverim jāspēj darboties ar vairākiem lietotājiem vienlaicīgi un ~300 augsuplādētiem attēliem.
--Sistēmai jābūt drošai, lai to nav iespējams neparedzēti ietekmēt vai modificēt
+- Atbilžu detektēšanai un labošanai jābut uzticamai, lai manuāla pārbaude ir nepieciešama tikai retos gadījumos.
+- Serverim jāspēj darboties ar vairākiem lietotājiem vienlaicīgi un ~300 augsuplādētiem attēliem.
+- Sistēmai jābūt drošai, lai to nav iespējams neparedzēti ietekmēt vai modificēt
