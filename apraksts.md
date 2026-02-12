@@ -42,3 +42,14 @@ Lietotājiem tā būs mājaslapa, kur augšuplādē sākotnēji darbu ar pareiza
 - Pat ja lietotājs vienlaicīgi iesniedz vairākus attēlus, backend labošanai būtu jāspēj visi apstrādāt
 - Katrs darbs ir jāizlabo 2 sekunžu laikā backendam
 - Lietotāju UI ir jābūt intuitīvai, lai procesu padarītu ērtāku un samazinātu kļūdu iespējamību
+
+
+###Edvards Mathers
+##### Funckionālās prasības:
+-Sistēma ļauj augšuplādēt pareizās atbildes un tās atpazīst no pārejiem pildītajiem darbiem
+-Sistēma ļauj vienlaicīgi augšuplādēt vairākas bildes 
+-Sistēmai jāspēj atpazīt, kura atbilde ir atzīmēta testā un skaitliski ievadīti skaitļi
+##### Nefunkcionālās prasības:
+-Atbilžu detektēšanai un labošanai jābut uzticamai, lai manuāla pārbaude ir nepieciešama tikai retos gadījumos.
+-Serverim jāspēj darboties ar vairākiem lietotājiem vienlaicīgi un ~300 augsuplādētiem attēliem.
+-Sistēmai jābūt drošai, lai to nav iespējams neparedzēti ietekmēt vai modificēt
