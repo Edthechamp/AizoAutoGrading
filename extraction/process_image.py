@@ -157,7 +157,10 @@ def get_box_answers(image, box, debug=False):
             rows[cy] = [(cx, cy, r)]
 
     #split rows per questions
+    #TODO: Create seperate groups for right and left questions, THEN add them so no need for question ocr
     questions = []
+    right_questions = []
+    left_questions = []
     for row_y, row_circles in sorted(rows.items()):
         x_positions = sorted(set(c[0] for c in row_circles))
 
@@ -169,40 +172,27 @@ def get_box_answers(image, box, debug=False):
             split_x = x_positions[gaps.index(max_gap)]
             left = [c for c in row_circles if c[0] <= split_x]
             right = [c for c in row_circles if c[0] > split_x]
-            questions.append(left)
-            questions.append(right)
+            left_questions.append(sorted(left, key=lambda c: c[0]))
+            right_questions.append(sorted(right, key=lambda c: c[0]))
             continue
-        questions.append(row_circles)
+        questions.append(sorted(row_circles, key=lambda c: c[0]))
+    questions += left_questions + right_questions
 
-    answers = {}
-    for question in questions:
-        sorted_question = sorted(question, key=lambda c: c[0])
-        c = sorted_question[0]
+    questions_per_row = len(questions[0])
+    collapsed = np.array([c for q in questions for c in q])
 
-        ###
-        #Maybe this can be made cleaner?
-        ###
-        number_region = image[y+c[1]-c[2]-20:y+c[1]+c[2]+20, x+c[0]-c[2]-100:x+c[0]-c[2]-20]
-        question_num = pytesseract.image_to_string(number_region, config='--psm 7 digits', lang='lav').strip()
+    r = int(np.median(collapsed[:,2]))
+    yy, xx = np.ogrid[-r:r, -r:r]
+    circle_mask = (xx**2 + yy**2 <= r**2)
+    crops = np.array([gray[cy-r:cy+r, cx-r:cx+r] for cx, cy, _ in collapsed])
+    means = crops[:, circle_mask].mean(axis=1)
 
-        #clean question_num
-        question_num = re.sub(r'[^0-9]', '', question_num)
+    means_2d = means.reshape(-1, questions_per_row)
+    answers = means_2d.argmin(axis=1)
+    answers = np.array(list("ABCD"))[answers]
+    result = {str(i+1): str(answers[i]) for i in range(len(answers))}
 
-        #determine which circle is filled
-        means = []
-        for cx, cy, r in sorted_question:
-            mask = np.zeros(gray.shape, dtype=np.uint8)
-            cv2.circle(mask, (cx, cy), r, 255, -1)
-            mean = cv2.mean(gray, mask=mask)[0]
-            means.append(mean)
-        if debug:
-            print(question_num + ":", means)
-        if min(means) > 100:
-            answers[question_num] = "ABCDEF"[means.index(min(means))]
-
-    sorted_answers = dict(sorted(answers.items(), key=lambda x: int(x[0])))
-
-    return sorted_answers
+    return result
 
 
 def get_student_code(image, debug=False):
@@ -280,13 +270,12 @@ def get_answers(image_path, debug=False):
 
         result[title] = answers
 
-    get_student_code(document_img, debug=debug)
-    # edv: settoju debug=debug nevis debug=True
+    get_student_code(document_img, debug)
 
-    if debug:
+    if True:
         print(result)
 
     return result
 
-#get_answers('image.jpg', False)
+get_answers('image.jpg', False)
 
