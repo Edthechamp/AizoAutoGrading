@@ -1,4 +1,3 @@
-#this is opencv logic and answer extraction
 import cv2
 import time
 import numpy as np
@@ -15,8 +14,17 @@ class CameraThread(QThread):
 
     def run(self):
         cap = cv2.VideoCapture(0)
+
+        #try and get good settings
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+        #check actual settings that we got
+        self.width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        self.height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+
+        print(f"Width: {self.width}, Height: {self.height}")
+
         cap.set(cv2.CAP_PROP_FPS, 30)
         while True:
             ret, frame = cap.read()
