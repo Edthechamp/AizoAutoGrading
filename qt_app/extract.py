@@ -1,6 +1,10 @@
 import cv2
 from imutils.perspective import four_point_transform
 import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, random_split
+from torchvision import datasets, transforms
 
 class Extractor():
     def __init__(self, camera_feed, document_pts, topic_boxes, code_box):
@@ -22,7 +26,46 @@ class Extractor():
         #---------
         #TEMPORARY
         #---------
-        scanned_document['code'] = '123456'
+        code_area = gray[self.code_box[0][1]:self.code_box[2][1], self.code_box[0][0]:self.code_box[1][0]]
+        copy = code_area.copy()
+        cv2.imshow('lel', code_area)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        blurred = cv2.GaussianBlur(code_area, (5, 5), 0)
+        edges = cv2.Canny(blurred, 30, 90)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        edges = cv2.dilate(edges, kernel)
+        cv2.imshow('lel', edges)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        roi_area = code_area.shape[0] * code_area.shape[1]
+
+        boxes = []
+        for cnt in contours:
+            peri = cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+            area = cv2.contourArea(approx)
+
+            if len(approx) == 4 and 0.005 * roi_area < area < roi_area * 0.2:
+                boxes.append(approx)
+                cv2.drawContours(copy, [cnt], -1, (0, 255, 0), 4)
+        
+        cv2.imshow('code boxes', copy)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        box_images = []
+        for box in boxes:
+            x, y, w, h = cv2.boundingRect(box)
+            box_images.append(code_area[y:y+h, x:x+w])
+
+        #scanned_document['code'] = '123456'
 
         #CURRENTLY NEEDS HEAVY TWEAKING
 
@@ -106,6 +149,56 @@ class Extractor():
     
         return scanned_document
 
+    def load_model(model_path, device):
+        model = DigitCNN().to(device)
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.eval()
+        return model
+
+    def predict(image_path, model, device):
+        from PIL import Image
+
+        scan_transform = transforms.Compose([
+            transforms.Grayscale(),
+            transforms.Resize((32, 32)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
+
+        img = Image.open(image_path).convert('L')
+        tensor = scan_transform(img).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            logits = model(tensor)
+            probs = torch.softmax(logits, dim=1)
+            confidence, predicted = probs.max(1)
+
+        return predicted.item(), confidence.item()
 
 
 
+
+class DigitCNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.features = nn.Sequential(
+
+            nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(64 * 8 * 8, 128),
+            nn.ReLU(),
+            nn.Dropout(p=0.4),
+            nn.Linear(128, 10),
+        )
