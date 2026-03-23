@@ -279,5 +279,5 @@ def get_answers(image_path, debug=False):
 
     return result
 
-get_answers('image.jpg', False)
+
 

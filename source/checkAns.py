@@ -3,9 +3,13 @@ import json
 import time
 from pathlib import Path
 
-from main import getFilePath
 debug=False
 
+
+def getFilePath(file):
+    base_path = Path(__file__).parent.parent
+    print(base_path / "Resources" / file)
+    return base_path / "Resources" / file
 
 #manliekas better approach, ari stradas ar multiple answer sheets.
 
