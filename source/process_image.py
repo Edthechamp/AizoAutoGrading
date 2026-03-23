@@ -261,13 +261,15 @@ def get_student_code(image, debug=False):
 
 def get_answers(image_path, debug=False):
     # edv: uztaisu ka passo path, nevis image, lai nav jaimporto cv2 citos failos
-    try:
-        image = cv2.imread(image_path)
-    except:
-        if debug:
-            print(f"process_image.get_answers() could not load image from path {image_path}")
-        return {"error":"failed reading image"}
 
+    print(f"image path in get_answers(){image_path}")
+    image = cv2.imread(image_path)
+
+    if image is None:
+        if debug:
+            print("image set to None in get_answers()")
+        return {"error":"image is None"}
+    # edv: partaisiju error checking, izradas cv2.imread() neizmet error ja nereado vnk setto None, tapec try: except: nestradaja.
 
     document_img = extract_document(image, debug)
     boxes = get_topic_boxes(document_img, debug)
