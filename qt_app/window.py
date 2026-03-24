@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
         btn_row = QHBoxLayout(btn_container)
 
         self.full_scan_btn = QPushButton("Veikt visu darbu skenesanu")
-        self.test_scan_btn.clicked.connect(self._full_scan)
+        self.full_scan_btn.clicked.connect(self._full_scan)
 
         self.close_btn = QPushButton("Aizvērt")
         self.close_btn.hide()
@@ -349,7 +349,7 @@ class MainWindow(QMainWindow):
     def _document_on_corner_submit(self):
         #warp current frame using the 4 drawn corners
         self.warped_frame = self._warp_document(self.current_frame, self.document_corners)
-        self.document_corners = order_points(np.array(self.document_corners, dtype="float32")).astype(int)
+        self.document_corners = order_points(np.array(self.document_corners, dtype="float32")).astype(int).tolist()
 
         #convert to QPixMap and cache it
         rgb = cv2.cvtColor(self.warped_frame, cv2.COLOR_BGR2RGB)
@@ -442,6 +442,7 @@ class MainWindow(QMainWindow):
     
     def _continue_to_scan(self):
         self.extractor = Extractor(self.thread, self.document_corners, self.topic_boxes, self.code_corners)
+        print(type(self.document_corners), self.document_corners)
         self.is_camera_visible = True
         self.stack.setCurrentIndex(3)
 
@@ -511,7 +512,6 @@ class MainWindow(QMainWindow):
 
     #PAGE 3
     def _scan_correct_ans(self):
-        #DOESNT WORK CURRENTLY
         answers = self.extractor.scan_answers()
 
         QMessageBox.information(self, "correct answers", "Atbildes:\n"+str(answers))

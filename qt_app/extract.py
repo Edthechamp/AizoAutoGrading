@@ -18,7 +18,7 @@ class Extractor():
     def scan_answers(self):
         frame = self.camera.latest_frame
 
-        document_img = four_point_transform(frame, self.documents_pts)
+        document_img = four_point_transform(frame, np.array(self.documents_pts))
         gray = cv2.cvtColor(document_img, cv2.COLOR_BGR2GRAY)
 
         #Remove shadows
@@ -116,13 +116,13 @@ class Extractor():
 
             box_h = box_img.shape[0]
             box_img = box_img[int(0.1*box_h):box_h, :]
-            min_r = 13 # tweak these ratios
+            min_r = 12 # tweak these ratios
             max_r = 25
 
             kernel = np.ones((3,3), np.uint8)
             gradient = cv2.morphologyEx(box_img, cv2.MORPH_GRADIENT, kernel)
 
-            circles = cv2.HoughCircles(gradient, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=30, minRadius=min_r, maxRadius=max_r)
+            circles = cv2.HoughCircles(gradient, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=32, minRadius=min_r, maxRadius=max_r)
 
             copy = box_img.copy()
             if circles is not None:
