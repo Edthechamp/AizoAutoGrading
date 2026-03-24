@@ -4,7 +4,10 @@ from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
 import cv2
 import numpy as np
 from imutils.perspective import four_point_transform, order_points
+import json
+
 from extract import Extractor
+import utils
 
 
 class MainWindow(QMainWindow):
@@ -520,8 +523,13 @@ class MainWindow(QMainWindow):
         self.rescan_btn.show()
         self.continue_to_test_btn.show()
 
-        #Add something here
-        #MAZERS COMPLETE SAVING ANSWERS
+        #-------
+        #     
+
+        with open(utils.getFilePath("answers.json"), "w") as f:
+            json.dump(answers, f, indent=4)
+            print("answers saved to file")
+        
 
     #--------
     # PAGE 4
@@ -531,12 +539,15 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(4)
 
     def _test_scan(self):
-        #IZPRINTE 1 LAPU
-        #...
+        
+        if utils.dispensePage():
+            answers = self.extractor.scan_answers()
+            QMessageBox.information(self, "scanned answers", "Atbildes:\n"+str(answers))
+        else:
+            QMessageBox.error(self,"ERROR","Failed to dispense test page, enter paper please or check printer")
+            
 
-        answers = self.extractor.scan_answers()
-
-        QMessageBox.information(self, "scanned answers", "Atbildes:\n"+str(answers))
+        
 
 
     def _continue_to_full_scan(self):
@@ -548,22 +559,28 @@ class MainWindow(QMainWindow):
 
     def _full_scan(self):
         self.full_scan_btn.hide()
-        # i IS FOR TESTING
-        i = 0
+ 
         while True:
-            #IZPRITNE 1 LAPU
-            #...
-            i+=1
-            if i > 500:
+            
+            if utils.dispensePage():
+                answers = self.extractor.scan_answers()
+                #pagaidam uztaisisu vnk ka converto uz json kas man ir settots checkAns, bet velak mos parrakstisu checkAns
+                
+                test = {
+                    "StudentID": answers.get("code", ""),
+                    "answers": {key: value for key, value in answers.items() if key != "code"}}
+        
+                grades = checkAns.GradeTest(test)
+                utils.saveAnswers(grades)
+                
+            else:
+                QMessageBox.information(self, "scanned answers", "Visas atbildes ir ieskenetas un saglabatas ...")
                 break
-
-            answers = self.extractor.scan_answers()
 
             #IZDOMA KO DARIT AR ATBILDEM, SAGLABAT VAI UZ VIETAS PARBAUDA
 
         #AFTER SCAN IS DONE
         #SAVE ANSWERS
-        QMessageBox.information(self, "scanned answers", "Visas atbildes ir ieskenetas un saglabatas ...")
 
         self.close_btn.show()
 

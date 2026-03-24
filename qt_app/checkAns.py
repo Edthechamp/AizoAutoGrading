@@ -23,18 +23,14 @@ def dataNormalize(stSheet, ansSheet):
         normalized = dict(sorted(normalized.items()))
     return normalized
 
-
-answerSheet=None
-
-with open(getFilePath("answers.json"), "r") as f:
-    answerSheet = json.load(f)
-
-if not answerSheet:
-    print("!!!ERROR: answers not found!!!")
-    exit()
-
+def load_answer_sheet():
+    with open(getFilePath("answers.json"), "r") as f:
+        return json.load(f)
+        
+answerSheet=load_answer_sheet()
 
 def GradeTest(test):
+    answerSheet=load_answer_sheet()
     stSheet=test["answers"]
 
     for section in stSheet.keys():
@@ -43,7 +39,8 @@ def GradeTest(test):
             if debug:
                 print("missing questions, filling in blanks")
     
-    stGrade=0 
+    stGrade=0
+
     grades={}
 
     for section in answerSheet.keys():
@@ -55,4 +52,4 @@ def GradeTest(test):
 
     #TODO:write to sql or atleast something permanent, both grade and answers
 
-    return {"studentID":test['StudentID'],"scores":grades}
+    return {"code":test['studentID'],"scores":grades}
