@@ -2,3 +2,7 @@ opencv-python
 imutils
 scipy
 pytesseract
+torch
+torchvision
+pillow
+pyqt6
