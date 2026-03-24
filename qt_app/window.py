@@ -39,7 +39,9 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_event_name_submit_page())
         self.stack.addWidget(self._build_document_corner_draw_page())
         self.stack.addWidget(self._build_topic_draw_page())
-        self.stack.addWidget(self._build_corrent_ans_scan_page())
+        self.stack.addWidget(self._build_correct_ans_scan_page())
+        self.stack.addWidget(self._build_test_scan_page())
+        self.stack.addWidget(self._build_full_scan_page())
 
         #camera
         self.thread = camera_thread
@@ -170,7 +172,7 @@ class MainWindow(QMainWindow):
         page.setLayout(layout)
         return page
 
-    def _build_corrent_ans_scan_page(self):
+    def _build_correct_ans_scan_page(self):
         page = QWidget()
         layout = QVBoxLayout()
         layout.setContentsMargins(8, 8, 8, 8)
@@ -183,12 +185,85 @@ class MainWindow(QMainWindow):
         self.scan_correct_ans = QPushButton("Skenet pareizas atbildes")
         self.scan_correct_ans.clicked.connect(self._scan_correct_ans)
 
+        self.rescan_btn = QPushButton("Meginat velreiz")
+        self.rescan_btn.hide()
+        self.rescan_btn.clicked.connect(self._scan_correct_ans)
+
+        self.continue_to_test_btn = QPushButton("Turpinat")
+        self.continue_to_test_btn.hide()
+        self.continue_to_test_btn.clicked.connect(self._continue_to_test)
+
         btn_row.addWidget(self.scan_correct_ans)
+        btn_row.addWidget(self.rescan_btn)
+        btn_row.addWidget(self.continue_to_test_btn)
+
+        self.scan_camera_label = CameraLabel("Gaida kameru...")
+        self.scan_camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.scan_camera_label.clicked.connect(self._document_on_camera_click)
 
         layout.addWidget(btn_container, stretch=15)
+        layout.addWidget(self.scan_camera_label, stretch=85)
+
 
         page.setLayout(layout)
         return page
+
+    def _build_test_scan_page(self):
+        page = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        btn_container = QWidget()
+        btn_container.setStyleSheet("background-color: #2b2b2b;")     #Nomainit lai smuki velak
+        btn_row = QHBoxLayout(btn_container)
+
+        self.test_scan_btn = QPushButton("Veikt testa skenesanu")
+        self.test_scan_btn.clicked.connect(self._test_scan)
+
+        self.continue_to_full_scan_btn = QPushButton("Turpinat")
+        self.continue_to_full_scan_btn.clicked.connect(self._continue_to_full_scan)
+
+        btn_row.addWidget(self.test_scan_btn)
+        btn_row.addWidget(self.continue_to_full_scan_btn)
+
+        self.test_scan_camera_label = CameraLabel("Gaida kameru...")
+        self.test_scan_camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.test_scan_camera_label.clicked.connect(self._document_on_camera_click)
+
+        layout.addWidget(btn_container, stretch=15)
+        layout.addWidget(self.scan_camera_label, stretch=85)
+
+
+        page.setLayout(layout)
+        return page
+
+    def _build_full_scan_page(self):
+        page = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        btn_container = QWidget()
+        btn_container.setStyleSheet("background-color: #2b2b2b;")     #Nomainit lai smuki velak
+        btn_row = QHBoxLayout(btn_container)
+
+        self.full_scan_btn = QPushButton("Veikt visu darbu skenesanu")
+        self.test_scan_btn.clicked.connect(self._full_scan)
+
+        self.close_btn = QPushButton("Aizvērt")
+        self.close_btn.hide()
+        self.close_btn.clicked.connect(self.close)
+
+        btn_row.addWidget(self.full_scan_btn)
+
+        layout.addWidget(btn_container)
+
+
+        page.setLayout(layout)
+        return page
+
+
 
     #--------
     # HANDLERS
@@ -246,8 +321,12 @@ class MainWindow(QMainWindow):
                     painter.drawLine(pts[3][0], pts[3][1], pts[0][0], pts[0][1])
 
                 painter.end()
-            
-            self.camera_label.setPixmap(pixmap)
+            if self.stack.currentIndex() == 1:
+                self.camera_label.setPixmap(pixmap)
+            elif self.stack.currentIndex() == 3:
+                self.scan_camera_label.setPixmap(pixmap)
+            elif self.stack.currentIndex() == 4:
+                self.test_scan_camera_label.setPixmap(pixmap)
     
     def _document_draw_corners(self):
         self.draw_btn.hide()
@@ -363,6 +442,7 @@ class MainWindow(QMainWindow):
     
     def _continue_to_scan(self):
         self.extractor = Extractor(self.thread, self.document_corners, self.topic_boxes, self.code_corners)
+        self.is_camera_visible = True
         self.stack.setCurrentIndex(3)
 
     def _on_document_click(self, x, y):
@@ -432,11 +512,62 @@ class MainWindow(QMainWindow):
     #PAGE 3
     def _scan_correct_ans(self):
         #DOESNT WORK CURRENTLY
-        #answers = self.extractor.scan_answers()
+        answers = self.extractor.scan_answers()
 
-        QMessageBox.information(self, "correct answers", "debug")
+        QMessageBox.information(self, "correct answers", "Atbildes:\n"+str(answers))
+
+        self.scan_correct_ans.hide()
+        self.rescan_btn.show()
+        self.continue_to_test_btn.show()
 
         #Add something here
+        #MAZERS COMPLETE SAVING ANSWERS
+
+    #--------
+    # PAGE 4
+    #--------
+
+    def _continue_to_test(self):
+        self.stack.setCurrentIndex(4)
+
+    def _test_scan(self):
+        #IZPRINTE 1 LAPU
+        #...
+
+        answers = self.extractor.scan_answers()
+
+        QMessageBox.information(self, "scanned answers", "Atbildes:\n"+str(answers))
+
+
+    def _continue_to_full_scan(self):
+        self.stack.setCurrentIndex(5)
+
+    #--------
+    # PAGE 5
+    #--------
+
+    def _full_scan(self):
+        self.full_scan_btn.hide()
+        # i IS FOR TESTING
+        i = 0
+        while True:
+            #IZPRITNE 1 LAPU
+            #...
+            i+=1
+            if i > 500:
+                break
+
+            answers = self.extractor.scan_answers()
+
+            #IZDOMA KO DARIT AR ATBILDEM, SAGLABAT VAI UZ VIETAS PARBAUDA
+
+        #AFTER SCAN IS DONE
+        #SAVE ANSWERS
+        QMessageBox.information(self, "scanned answers", "Visas atbildes ir ieskenetas un saglabatas ...")
+
+        self.close_btn.show()
+
+
 
 
 

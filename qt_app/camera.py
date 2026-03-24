@@ -13,7 +13,7 @@ class CameraThread(QThread):
         self.latest_frame = None  # cache the latest raw frame
 
     def run(self):
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture('http://10.152.35.165:8080/video')
 
         #try and get good settings
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
