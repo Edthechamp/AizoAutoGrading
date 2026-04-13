@@ -8,15 +8,23 @@ import numpy as np
 
 
 class Extractor():
-    def __init__(self, camera_feed, document_pts, topic_boxes, code_box):
+    def __init__(self, camera_feed, document_pts, topic_boxes, code_box, camera_rotation=0):
         super().__init__()
         self.camera = camera_feed
         self.documents_pts = document_pts
         self.topic_boxes = topic_boxes
         self.code_box = code_box
+        self.camera_rotation = camera_rotation
     
     def scan_answers(self):
         frame = self.camera.latest_frame
+
+        if self.camera_rotation == 90:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        elif self.camera_rotation == 180:
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+        elif self.camera_rotation == 270:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
         document_img = four_point_transform(frame, np.array(self.documents_pts))
         gray = cv2.cvtColor(document_img, cv2.COLOR_BGR2GRAY)
@@ -29,162 +37,334 @@ class Extractor():
         scanned_document = {}
 
         #extract code
-        code_area = gray[self.code_box[0][1]:self.code_box[2][1], self.code_box[0][0]:self.code_box[1][0]]
-        code_area = cv2.rotate(code_area, cv2.ROTATE_90_CLOCKWISE)
-        copy = code_area.copy()
+        cx, cy, cw, ch = self.code_box
+        code_area = gray[cy:cy+ch, cx:cx+cw]
 
-        _, binary = cv2.threshold(code_area, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-        blurred = cv2.GaussianBlur(binary, (3, 3), 0)
-
-        edges = cv2.Canny(blurred, 30, 90)
-
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        boxes = []
-        for cnt in contours:
-            if len(cnt) < 3:
-                continue
-            area = cv2.contourArea(cnt)
-            x, y, w, h = cv2.boundingRect(cnt)
-            aspect_ratio = w / float(h)
-            if 0.6 < aspect_ratio < 1.4 and 1000 < area < 8000:
-                boxes.append((x, y, w, h))
-
-        # if we got fewer than 6, split the widest box (dash merge)
-        boxes = sorted(boxes, key=lambda b: b[0])
-        if len(boxes) < 6:
-            median_w = np.median([b[2] for b in boxes])
-            new_boxes = []
-            for b in boxes:
-                x, y, w, h = b
-                if w > median_w * 1.5:  # this one is merged
-                    half = w // 2
-                    new_boxes.append((x, y, half, h))
-                    new_boxes.append((x + half, y, half, h))
-                else:
-                    new_boxes.append(b)
-            boxes = sorted(new_boxes, key=lambda b: b[0])
-
-        # crop with dynamic margin to remove box border
-        def crop_to_digit(code_area, x, y, w, h):
-            crop = code_area[y+5:y+h-5, x+5:x+w-5]
-            _, binary = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            coords = cv2.findNonZero(binary)
-            if coords is None:
-                return crop
-            cx, cy, cw, ch = cv2.boundingRect(coords)
-            pad = 4
-            return crop[max(0,cy-pad):cy+ch+pad, max(0,cx-pad):cx+cw+pad]
-
-        box_images = []
-        for x, y, w, h in boxes:
-            digit_img = crop_to_digit(binary, x, y, w, h)
-            box_images.append(digit_img)
-        
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = Extractor.load_model("mnist_model.pth", device)
-
-        code_digits = []
-        for img in box_images:  # sort left to right
-            #remove box around the number
-            coords = cv2.findNonZero(img)
-            x, y, w, h = cv2.boundingRect(coords)
-
-            img = img[x:h, y:w]
-            img = cv2.bitwise_not(img)
-            #cv2.imshow('code boxes', img)
-            #cv2.waitKey(0)
-            #cv2.destroyAllWindows()
-            digit, confidence = Extractor.predict(img, model, device)
-            print("plis", digit, confidence)
-            code_digits.append(str(digit))
-
-        scanned_document['code'] = ''.join(code_digits)
+        scanned_code = self.get_code(code_area)
+        if len(scanned_code) == 6:
+            scanned_document['code'] = scanned_code
+        else:
+            print("error detecting code")
+            return
 
         #extract answers
         for box in self.topic_boxes:
-            tl, tr, br, bl = box["pts"]
+            bx, by, bw, bh = box["box"]
             box_label = box["label"]
 
-            box_img = gray[tl[1]:bl[1], tl[0]:tr[0]]
-            #---------
-            #TEMPORARY
-            #---------
-            box_img = cv2.rotate(box_img, cv2.ROTATE_90_CLOCKWISE)
-
-
-            box_h = box_img.shape[0]
-            box_img = box_img[int(0.1*box_h):box_h, :]
-            min_r = 12 # tweak these ratios
-            max_r = 25
-
-            kernel = np.ones((3,3), np.uint8)
-            gradient = cv2.morphologyEx(box_img, cv2.MORPH_GRADIENT, kernel)
-
-            circles = cv2.HoughCircles(gradient, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=32, minRadius=min_r, maxRadius=max_r)
-
-            copy = box_img.copy()
-            if circles is not None:
-                for cx, cy, r in np.round(circles[0]).astype(int):
-                    cv2.circle(copy, (cx, cy), r, (0, 255, 0), 2)
-
-            cv2.imshow('marked answer circles', copy)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-
-            #group circles per row
-            rows = {}
-            for cx, cy, r in np.round(circles[0]).astype(int):
-                matched = False
-                for row_y in rows:
-                    if abs(cy - row_y) < 10:
-                        rows[row_y].append((cx, cy, r))
-                        matched = True
-                        break
-                if not matched:
-                    rows[cy] = [(cx, cy, r)]
-
-            #split rows per questions
-            questions = []
-            right_questions = []
-            left_questions = []
-            for row_y, row_circles in sorted(rows.items()):
-                x_positions = sorted(set(c[0] for c in row_circles))
-
-                gaps = [x_positions[i+1] - x_positions[i] for i in range(len(x_positions)-1)]
-                avg_gap = sum(gaps) / len(gaps)
-                max_gap = max(gaps)
-
-                if max_gap > avg_gap * 2:
-                    split_x = x_positions[gaps.index(max_gap)]
-                    left = [c for c in row_circles if c[0] <= split_x]
-                    right = [c for c in row_circles if c[0] > split_x]
-                    left_questions.append(sorted(left, key=lambda c: c[0]))
-                    right_questions.append(sorted(right, key=lambda c: c[0]))
-                    continue
-                questions.append(sorted(row_circles, key=lambda c: c[0]))
-            questions += left_questions + right_questions
-
-            questions_per_row = len(questions[0])
-            collapsed = np.array([c for q in questions for c in q])
-
-            r = int(np.median(collapsed[:,2]))
-            yy, xx = np.ogrid[-r:r, -r:r]
-            circle_mask = (xx**2 + yy**2 <= r**2)
-            crops = np.array([box_img[cy-r:cy+r, cx-r:cx+r] for cx, cy, _ in collapsed])
-            means = crops[:, circle_mask].mean(axis=1)
-
-            means_2d = means.reshape(-1, questions_per_row)
-            answers = means_2d.argmin(axis=1)
-            answers = np.array(list("ABCD"))[answers]
-            result = {str(i+1): str(answers[i]) for i in range(len(answers))}
-
+            box_img = gray[by:by+bh, bx:bx+bw]
+            result = self.detect_answers(box_img)
             scanned_document[box_label] = result
         
         print(scanned_document)
     
         return scanned_document
+
+
+    
+    def get_code(self, gray):
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+        #debug = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
+
+        # Detect boxes in img
+
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
+
+        # Opening = erode then dilate
+        # Erode kills anything shorter than the kernel, dilate restores what survived
+        h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
+        v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)
+
+
+        # Because kernel is thin, it detects multiple lines per actual box line, making it appear thick.
+        # This makes each detected vertical line only 1 pixel wide
+        contours, _ = cv2.findContours(v_lines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) 
+        v_lines_1px = np.zeros_like(v_lines)
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            center_x = x + (w // 2)
+            cv2.line(v_lines_1px, (center_x, y), (center_x, y + h), 255, 1)
+
+        v_lines = v_lines_1px
+
+
+
+
+        #cv2.imshow('vertical only', v_lines) 
+        #cv2.waitKey(0)
+        #cv2.destroyAllWindows()
+
+        col_proj = np.sum(v_lines, axis=0)
+
+        from scipy.ndimage import uniform_filter1d
+        from scipy.signal import find_peaks
+
+        col_proj_smooth = uniform_filter1d(col_proj.astype(float), size=3)
+
+        col_peaks, _ = find_peaks(
+            col_proj_smooth,
+            height=np.max(col_proj_smooth) * 0.8,
+            distance=3
+        )
+
+    
+        #import matplotlib.pyplot as plt
+
+        #plt.figure(figsize=(15, 4))
+        #plt.plot(col_proj_smooth)
+        #plt.scatter(col_peaks, col_proj_smooth[col_peaks], color='green', zorder=5, label='detected peaks')
+        #plt.axhline(np.max(col_proj_smooth) * 0.8, color='red', linestyle='--', label='height threshold')
+        #plt.xlabel('column index')
+        #plt.legend()
+        #plt.show()
+
+        boxes_x = [(col_peaks[i], col_peaks[i+1]) for i in range(0, len(col_peaks) - 1, 2)]
+
+        if len(boxes_x) % 2 != 0:
+            print("Error detecting box lines: not an even number!")
+            return
+    
+        boxes = []
+
+        for (x_left, x_right) in boxes_x:
+            strip = h_lines[:, x_left:x_right]
+            strip_proj = np.sum(strip, axis=1)
+
+            strip_proj_smooth = uniform_filter1d(strip_proj.astype(float), size=3)
+            row_peaks, _ = find_peaks(
+                strip_proj_smooth,
+                height=np.max(strip_proj_smooth) * 0.3,
+                distance=20)
+
+            if len(row_peaks) < 2:
+                print(f"Warning: only found {len(row_peaks)} row peaks for strip x={x_left}..{x_right}, skipping")
+                continue
+
+            row_peaks = np.sort(row_peaks[np.argsort(strip_proj_smooth[row_peaks])[-2:]])
+
+
+            y_top, y_bot = row_peaks[0], row_peaks[-1]
+
+            boxes.append((x_left, y_top, x_right-x_left, y_bot-y_top))
+    
+            #cv2.rectangle(debug, (x_left, y_top), (x_right, y_bot), (0, 255, 0), 3)
+
+
+        #Detect handwritten digits
+
+        h, w = gray.shape
+
+        box_images = []
+        for box in boxes:
+            y_pad = 10
+            x_pad = 5
+            box_img = binary[max(box[1] - y_pad, 0): min(box[1] + box[3] + y_pad, h), max(box[0] - x_pad, 0):min(box[0] + box[2] + x_pad, w)]
+            box_img_gray = gray[max(box[1] - y_pad, 0): min(box[1] + box[3] + y_pad, h), max(box[0] - x_pad, 0):min(box[0] + box[2] + x_pad, w)]
+
+            contours, _ = cv2.findContours(box_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            mask = np.zeros(box_img.shape, dtype=np.uint8)
+
+            for cnt in contours:
+                cv2.drawContours(mask, [cnt], -1, 255, 4)
+
+            box_img_gray[mask == 255] = 255
+
+            by, bx = box_img_gray.shape
+            box_img_gray = box_img_gray[y_pad:by - y_pad, x_pad: bx - x_pad]
+
+            box_final = cv2.bitwise_not(box_img_gray) #lets see if this works
+            box_images.append(box_final)
+
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = Extractor.load_model("emnist_trained.pth", device)
+
+        code_digits = []
+        for img in box_images:  # sort left to right
+            digit, confidence = Extractor.predict(img, model, device)
+            print("plis", digit, confidence)
+            code_digits.append(str(digit))
+
+        return ''.join(code_digits)
+
+
+        
+    def detect_circle_bands(self, peaks, v_proj):
+        i = 0
+        bands = []
+
+        while i < len(peaks) - 1:
+            start = peaks[i]
+            end = peaks[i+1]
+
+            local_thresh = 0.2 * (v_proj[start] + v_proj[end]) / 2
+
+            is_band = True
+            for j in range(start, end):
+                if v_proj[j] < local_thresh:
+                    is_band = False
+                    break
+
+            if is_band:
+                bands.append((start, end))
+                i += 2 #end cannot be the start of the next peak 
+            else:
+                i += 1
+
+        # find average width, if some width is signifantly lower, it means it's probably not the circle band
+        bands = np.array(bands)
+        if len(bands) == 0:
+            print("No bands found")
+            return bands
+
+        widths = np.diff(bands, axis=1).flatten()
+        avg_width = np.mean(widths)
+        bands = bands[widths >= 0.7 * avg_width]
+
+        return bands
+
+
+    def detect_answers(self, gray):
+        h = gray.shape[0]
+        gray = gray[int(0.05*h):, :] #to "cut" the top edge a bit off so it's not a closed contour and cv2.RETR_EXTERNAL doesn't detect only that
+
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blur, 50, 150)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        cv2.imshow('gray', gray)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+    
+        binary = np.zeros(gray.shape, dtype=np.uint8)
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            perimeter = cv2.arcLength(cnt, True)
+            if perimeter == 0:
+                continue
+            circularity = 4 * np.pi * area / (perimeter ** 2)
+            if circularity > 0.4:
+                cv2.drawContours(binary, [cnt], -1, 255, 2)
+
+
+
+        cv2.imshow('bin', binary)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        # 1. Find the the y peaks, that enclose the circles (basically the islands in the projection
+        col_proj = np.sum(binary, axis=0)
+
+
+        from scipy.ndimage import uniform_filter1d
+        from scipy.signal import find_peaks
+        import matplotlib.pyplot as plt
+
+
+        col_proj_smooth = uniform_filter1d(col_proj.astype(float), size=7)
+
+        col_peaks, _ = find_peaks(
+            col_proj_smooth,
+            prominence = np.max(col_proj_smooth) * 0.05,
+            distance=3
+        )
+
+        v_bands = self.detect_circle_bands(col_peaks, col_proj_smooth)
+
+        band_centers = [(b[0]+b[1])//2 for b in v_bands]
+        gaps = np.diff(band_centers)
+        avg_gap = np.mean(gaps)
+
+        split_idx = None
+        for i, gap in enumerate(gaps):
+            if gap > avg_gap * 2:
+                split_idx = i + 1
+                break
+
+        question_cols = [v_bands[:split_idx], v_bands[split_idx:]] if split_idx else [v_bands]
+
+        answers = {}
+        current_question = 1
+
+        #DEBUG
+        total_circles = 0
+
+        for question_col in question_cols:
+            band_data = []
+
+            for band in question_col:
+                padding = 5
+                x1 = max(band[0] - padding, 0)
+                x2 = min(band[1] + padding, binary.shape[1])
+                region = binary[:, x1:x2]
+
+                row_proj = np.sum(region, axis=1)
+
+                row_proj_smooth = uniform_filter1d(row_proj.astype(float), size=11)
+
+                row_peaks,  _= find_peaks(
+                    row_proj_smooth,
+                    prominence = np.max(row_proj_smooth) * 0.1,
+                    distance = 10
+                )
+
+                #plt.figure(figsize=(15, 4))
+                #plt.plot(row_proj_smooth)
+                #plt.scatter(row_peaks, row_proj_smooth[row_peaks], color='green', zorder=5, label='detected peaks')
+                #plt.axhline(np.max(row_proj_smooth) * 0.28, color='red', linestyle='--', label='height threshold')
+                #plt.xlabel('column index')
+                #plt.legend()
+                #plt.show()
+
+                h_bands = self.detect_circle_bands(row_peaks, row_proj_smooth)
+                total_circles += len(h_bands)
+
+                band_data.append((band, h_bands))
+        
+            num_rows = max(len(r[1]) for r in band_data)
+
+            for row in range(num_rows):
+                fill_ratios = []
+
+                coords = []
+                for (x1, x2), h_bands in band_data:
+                    coords.append((x1, x2, h_bands[row][0], h_bands[row][1]))
+
+                avg_width = np.mean([x2 - x1 for x1, x2, _, _ in coords]) + 5 #padding
+                avg_height = np.mean([y2 - y1 for _, _, y1, y2 in coords]) + 5 #padding
+
+                for x1, x2, y1, y2 in coords:
+                    cx = int((x1 + x2) / 2)
+                    cy = int((y1 + y2) / 2)
+
+                    roi = gray[int(cy - avg_height / 2):int(cy + avg_height / 2), int(cx - avg_width / 2):int(cx + avg_width / 2)]
+                    fill_ratios.append(1.0 - np.mean(roi) / 255.0)
+
+                best = int(np.argmax(fill_ratios))
+                if fill_ratios[best] < 0.3:
+                    answers[str(current_question)] = ""
+                else:
+                    answers[str(current_question)] = "ABCDEF"[best]
+                current_question += 1
+
+
+        #plt.figure(figsize=(15, 4))
+        #plt.plot(col_proj_smooth)
+        #plt.scatter(col_peaks, col_proj_smooth[col_peaks], color='green', zorder=5, label='detected peaks')
+        #plt.axhline(np.max(col_proj_smooth) * 0.28, color='red', linestyle='--', label='height threshold')
+        #plt.xlabel('column index')
+        #plt.legend()
+        #plt.show()
+
+
+        return answers
 
     def load_model(model_path, device):
         model = DigitCNN().to(device)

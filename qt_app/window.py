@@ -1,5 +1,9 @@
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QLineEdit, QVBoxLayout, QWidget, QStackedWidget, QHBoxLayout, QInputDialog, QMessageBox
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QPushButton, QLabel, QLineEdit,
+    QVBoxLayout, QWidget, QStackedWidget, QHBoxLayout,
+    QInputDialog, QMessageBox
+)
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
 import cv2
 import numpy as np
@@ -8,6 +12,7 @@ import json
 
 from extract import Extractor
 import utils
+import checkAns
 
 
 class MainWindow(QMainWindow):
@@ -16,27 +21,34 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Labotajs")
         self.setFixedSize(QSize(1600, 900))
 
-        #page 0 state
         self.event_name = ""
 
-        #page 1 state
         self.is_drawing_corners = False
         self.is_camera_visible = False
         self.document_corners = []
+        self.camera_rotation = 0
 
-        #page 2 state
-        self.topic_boxes = [] #[{"label": str, "pts": [[x,y]x4]}, ...]
-        self.current_topic_pts = []
+        self.topic_boxes = []
+        self.current_topic_box = None
         self.current_topic_name = None
-        self.code_corners = []
+
+        self.code_box = None
+        self.pending_code_box = None
+
         self.draw_mode = None
         self.warped_frame = None
         self.warped_pixmap = None
 
-        #page 3 state
+        self.drag_start = None
+        self.drag_end = None
+
+        self.offset_x = 0.0
+        self.offset_y = 0.0
+        self.scale_x = 1.0
+        self.scale_y = 1.0
+
         self.extractor = None
 
-        #stack
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
         self.stack.addWidget(self._build_event_name_submit_page())
@@ -46,14 +58,12 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_test_scan_page())
         self.stack.addWidget(self._build_full_scan_page())
 
-        #camera
         self.thread = camera_thread
         self.thread.frame_ready.connect(self._update_frame)
-    
+
     def _build_event_name_submit_page(self):
         page = QWidget()
         layout = QVBoxLayout()
-
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
@@ -78,16 +88,18 @@ class MainWindow(QMainWindow):
     def _build_document_corner_draw_page(self):
         page = QWidget()
         layout = QVBoxLayout()
-
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
         btn_container = QWidget()
-        btn_container.setStyleSheet("background-color: #2b2b2b;")     #Nomainit lai smuki velak
+        btn_container.setStyleSheet("background-color: #2b2b2b;")
         btn_row = QHBoxLayout(btn_container)
 
         self.draw_btn = QPushButton("Atzimet dokumenta robezas")
         self.draw_btn.clicked.connect(self._document_draw_corners)
+
+        self.rotate_btn = QPushButton("Pagriezt 90°")
+        self.rotate_btn.clicked.connect(self._rotate_camera)
 
         self.reset_btn = QPushButton("Izdzest atzimetos punktus")
         self.reset_btn.hide()
@@ -98,9 +110,9 @@ class MainWindow(QMainWindow):
         self.confirm_btn.clicked.connect(self._document_on_corner_submit)
 
         btn_row.addWidget(self.draw_btn)
+        btn_row.addWidget(self.rotate_btn)
         btn_row.addWidget(self.reset_btn)
         btn_row.addWidget(self.confirm_btn)
-
 
         self.camera_label = CameraLabel("Gaida kameru...")
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -115,12 +127,11 @@ class MainWindow(QMainWindow):
     def _build_topic_draw_page(self):
         page = QWidget()
         layout = QVBoxLayout()
-
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
         btn_container = QWidget()
-        btn_container.setStyleSheet("background-color: #2b2b2b;")     #Nomainit lai smuki velak
+        btn_container.setStyleSheet("background-color: #2b2b2b;")
         btn_row = QHBoxLayout(btn_container)
 
         self.add_topic_btn = QPushButton("Atzimet jaunu temata kastiti")
@@ -142,7 +153,6 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self.cancel_topic_btn)
         btn_row.addWidget(self.save_topic_btn)
         btn_row.addWidget(self.continue_to_code_btn)
-
 
         self.add_code_btn = QPushButton("Atzimet koda laukumu")
         self.add_code_btn.hide()
@@ -167,7 +177,10 @@ class MainWindow(QMainWindow):
 
         self.document_label = CameraLabel()
         self.document_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.document_label.clicked.connect(self._on_document_click)
+
+        self.document_label.pressed.connect(self._on_document_press)
+        self.document_label.dragged.connect(self._on_document_drag)
+        self.document_label.released.connect(self._on_document_release)
 
         layout.addWidget(btn_container, stretch=15)
         layout.addWidget(self.document_label, stretch=85)
@@ -182,7 +195,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
 
         btn_container = QWidget()
-        btn_container.setStyleSheet("background-color: #2b2b2b;")     #Nomainit lai smuki velak
+        btn_container.setStyleSheet("background-color: #2b2b2b;")
         btn_row = QHBoxLayout(btn_container)
 
         self.scan_correct_ans = QPushButton("Skenet pareizas atbildes")
@@ -202,11 +215,9 @@ class MainWindow(QMainWindow):
 
         self.scan_camera_label = CameraLabel("Gaida kameru...")
         self.scan_camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scan_camera_label.clicked.connect(self._document_on_camera_click)
 
         layout.addWidget(btn_container, stretch=15)
         layout.addWidget(self.scan_camera_label, stretch=85)
-
 
         page.setLayout(layout)
         return page
@@ -218,7 +229,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
 
         btn_container = QWidget()
-        btn_container.setStyleSheet("background-color: #2b2b2b;")     #Nomainit lai smuki velak
+        btn_container.setStyleSheet("background-color: #2b2b2b;")
         btn_row = QHBoxLayout(btn_container)
 
         self.test_scan_btn = QPushButton("Veikt testa skenesanu")
@@ -232,11 +243,9 @@ class MainWindow(QMainWindow):
 
         self.test_scan_camera_label = CameraLabel("Gaida kameru...")
         self.test_scan_camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.test_scan_camera_label.clicked.connect(self._document_on_camera_click)
 
         layout.addWidget(btn_container, stretch=15)
-        layout.addWidget(self.scan_camera_label, stretch=85)
-
+        layout.addWidget(self.test_scan_camera_label, stretch=85)
 
         page.setLayout(layout)
         return page
@@ -248,7 +257,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
 
         btn_container = QWidget()
-        btn_container.setStyleSheet("background-color: #2b2b2b;")     #Nomainit lai smuki velak
+        btn_container.setStyleSheet("background-color: #2b2b2b;")
         btn_row = QHBoxLayout(btn_container)
 
         self.full_scan_btn = QPushButton("Veikt visu darbu skenesanu")
@@ -262,17 +271,9 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(btn_container)
 
-
         page.setLayout(layout)
         return page
 
-
-
-    #--------
-    # HANDLERS
-    # -------
-
-    #PAGE 0
     def _on_event_name_submit(self):
         event_name = self.event_name.text().strip()
         if not event_name:
@@ -281,67 +282,77 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(1)
         self.is_camera_visible = True
 
-
-    #PAGE 1
     def _update_frame(self, frame):
-        if self.is_camera_visible:
-            self.current_frame = frame
+        if not self.is_camera_visible:
+            return
 
-            # convert BGR -> RGB
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb.shape
+        if self.camera_rotation == 90:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        elif self.camera_rotation == 180:
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+        elif self.camera_rotation == 270:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
-            # convert to QImage then QPixmap
-            qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
-            pixmap = QPixmap.fromImage(qimg)
+        self.current_frame = frame
 
-            # scale to fit the label while keeping aspect ratio
-            pixmap = pixmap.scaled(
-                self.camera_label.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.FastTransformation
-            )
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimg)
 
-            self.offset_x = (self.camera_label.width() - pixmap.width()) / 2
-            self.offset_y = (self.camera_label.height() - pixmap.height()) / 2
-            self.scale_x = self.thread.width / pixmap.width()
-            self.scale_y = self.thread.height / pixmap.height()
+        pixmap = pixmap.scaled(
+            self.camera_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation
+        )
 
-            # draw corners
-            if self.document_corners:
-                painter = QPainter(pixmap)
-                pen = QPen(QColor(0, 255, 0), 3)
-                painter.setPen(pen)
+        self.offset_x = (self.camera_label.width() - pixmap.width()) / 2
+        self.offset_y = (self.camera_label.height() - pixmap.height()) / 2
+        self.scale_x = frame.shape[1] / pixmap.width()
+        self.scale_y = frame.shape[0] / pixmap.height()
 
-                
-                pts = [(int(x / self.scale_x), int(y / self.scale_y)) for x, y in self.document_corners]
+        painter = QPainter(pixmap)
+        painter.setPen(QPen(QColor(0, 255, 0), 3))
 
-                for px, py in pts:
-                    painter.drawEllipse(px - 6, py - 6, 12, 12)
-                for i in range(len(pts) - 1):
-                    painter.drawLine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
-                if len(pts) == 4:
-                    painter.drawLine(pts[3][0], pts[3][1], pts[0][0], pts[0][1])
+        if self.document_corners:
+            pts = [(int(x / self.scale_x), int(y / self.scale_y))
+                   for x, y in self.document_corners]
+            for px, py in pts:
+                painter.drawEllipse(px - 6, py - 6, 12, 12)
+            for i in range(len(pts) - 1):
+                painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+            if len(pts) == 4:
+                painter.drawLine(pts[3][0], pts[3][1], pts[0][0], pts[0][1])
 
-                painter.end()
-            if self.stack.currentIndex() == 1:
-                self.camera_label.setPixmap(pixmap)
-            elif self.stack.currentIndex() == 3:
-                self.scan_camera_label.setPixmap(pixmap)
-            elif self.stack.currentIndex() == 4:
-                self.test_scan_camera_label.setPixmap(pixmap)
-    
+        painter.end()
+
+        idx = self.stack.currentIndex()
+        if idx == 1:
+            self.camera_label.setPixmap(pixmap)
+        elif idx == 3:
+            self.scan_camera_label.setPixmap(pixmap)
+        elif idx == 4:
+            self.test_scan_camera_label.setPixmap(pixmap)
+
+    def _rotate_camera(self):
+        self.camera_rotation = (self.camera_rotation + 90) % 360
+        self.document_corners = []
+        self.confirm_btn.setEnabled(False)
+
     def _document_draw_corners(self):
         self.draw_btn.hide()
         self.reset_btn.show()
         self.confirm_btn.show()
-        self.confirm_btn.setEnabled(False) #also shows the button
+        self.confirm_btn.setEnabled(False)
         self.is_drawing_corners = True
-    
+
     def _document_on_camera_click(self, x, y):
         if not self.is_drawing_corners or len(self.document_corners) >= 4:
             return
-        self.document_corners.append([int((x - self.offset_x) * self.scale_x), int((y - self.offset_y) * self.scale_y)])
+        self.document_corners.append(
+            [int((x - self.offset_x) * self.scale_x),
+             int((y - self.offset_y) * self.scale_y)]
+        )
         if len(self.document_corners) == 4:
             self.confirm_btn.setEnabled(True)
 
@@ -350,11 +361,12 @@ class MainWindow(QMainWindow):
         self.confirm_btn.setEnabled(False)
 
     def _document_on_corner_submit(self):
-        #warp current frame using the 4 drawn corners
         self.warped_frame = self._warp_document(self.current_frame, self.document_corners)
-        self.document_corners = order_points(np.array(self.document_corners, dtype="float32")).astype(int).tolist()
+        self.document_corners = (
+            order_points(np.array(self.document_corners, dtype="float32"))
+            .astype(int).tolist()
+        )
 
-        #convert to QPixMap and cache it
         rgb = cv2.cvtColor(self.warped_frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb.shape
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
@@ -363,33 +375,33 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(2)
         self.is_camera_visible = False
         self._update_document_frame()
-    
+
     def _warp_document(self, frame, corners):
         raw_pts = np.array([(x, y) for x, y in corners], dtype="float32")
-        warped = four_point_transform(frame, raw_pts)
+        return four_point_transform(frame, raw_pts)
 
-        return warped
-
-   #PAGE 2 
     def _start_adding_topic(self):
         self.draw_mode = "topic"
-        self.current_topic_pts = []
+        self.current_topic_box = None
+        self.drag_start = None
+        self.drag_end = None
         self.add_topic_btn.hide()
         self.cancel_topic_btn.show()
         self.save_topic_btn.show()
         self.save_topic_btn.setEnabled(False)
+        self.continue_to_code_btn.hide()
 
         name, ok = QInputDialog.getText(self, "Temas nosaukums", "Ievadi temas nosaukumu:")
         if not ok or not name.strip():
+            self._cancel_adding_topic()
             return
-
         self.current_topic_name = name
 
-        self.continue_to_code_btn.hide()
-
     def _cancel_adding_topic(self):
-        self.current_topic_pts = []
+        self.current_topic_box = None
         self.current_topic_name = None
+        self.drag_start = None
+        self.drag_end = None
         self.draw_mode = None
         self.add_topic_btn.show()
         self.cancel_topic_btn.hide()
@@ -400,75 +412,114 @@ class MainWindow(QMainWindow):
             self.continue_to_code_btn.show()
 
     def _save_topic(self):
-        self.topic_boxes.append({"label": self.current_topic_name.strip(), "pts": list(order_points(np.array(self.current_topic_pts, dtype="float32")).astype(int))})
-        #cool trick to save rewriting code
+        self.topic_boxes.append({
+            "label": self.current_topic_name.strip(),
+            "box": self.current_topic_box,
+        })
         self._cancel_adding_topic()
         self.continue_to_code_btn.show()
-    
+
     def _continue_to_code(self):
         self.add_topic_btn.hide()
         self.cancel_topic_btn.hide()
         self.save_topic_btn.hide()
-
         self.add_code_btn.show()
         self.draw_mode = None
-
         self.continue_to_code_btn.hide()
-    
+
     def _start_adding_code(self):
         self.draw_mode = "code"
-        self.code_corners = []
+        self.pending_code_box = None
+        self.drag_start = None
+        self.drag_end = None
         self.add_code_btn.hide()
         self.cancel_code_btn.show()
         self.save_code_btn.show()
         self.save_code_btn.setEnabled(False)
-
         self.continue_to_scan_btn.hide()
-    
+
     def _cancel_adding_code(self):
         self.draw_mode = None
-        self.code_corners = []
-        self.add_code_btn.show()
-        self.cancel_code_btn.hide()
-        self.save_code_btn.hide()
-        self._update_document_frame()
-    
-    def _save_code(self):
-        self.draw_mode = None
-        self.code_corners = list(order_points(np.array(self.code_corners, dtype="float32")).astype(int))
+        self.pending_code_box = None
+        self.drag_start = None
+        self.drag_end = None
         self.add_code_btn.show()
         self.cancel_code_btn.hide()
         self.save_code_btn.hide()
         self._update_document_frame()
 
+    def _save_code(self):
+        self.draw_mode = None
+        self.code_box = self.pending_code_box
+        self.pending_code_box = None
+        self.drag_start = None
+        self.drag_end = None
+        self.add_code_btn.show()
+        self.cancel_code_btn.hide()
+        self.save_code_btn.hide()
+        self._update_document_frame()
         self.continue_to_scan_btn.show()
-    
+
     def _continue_to_scan(self):
-        self.extractor = Extractor(self.thread, self.document_corners, self.topic_boxes, self.code_corners)
-        print(type(self.document_corners), self.document_corners)
+        self.extractor = Extractor(
+            self.thread, self.document_corners, self.topic_boxes, self.code_box, self.camera_rotation
+        )
         self.is_camera_visible = True
         self.stack.setCurrentIndex(3)
 
-    def _on_document_click(self, x, y):
+    def _to_image_coords(self, widget_x, widget_y):
+        return (
+            int((widget_x - self.offset_x) * self.scale_x),
+            int((widget_y - self.offset_y) * self.scale_y),
+        )
+
+    def _on_document_press(self, x, y):
+        if self.draw_mode not in ("topic", "code"):
+            return
+
         if self.draw_mode == "topic":
-            if len(self.current_topic_pts) >= 4:
-                return
-            self.current_topic_pts.append([int((x - self.offset_x) * self.scale_x), int((y - self.offset_y) * self.scale_y)])
-            if len(self.current_topic_pts) == 4:
-                self.save_topic_btn.setEnabled(True)
-            self._update_document_frame()
+            self.current_topic_box = None
+            self.save_topic_btn.setEnabled(False)
+        else:
+            self.pending_code_box = None
+            self.save_code_btn.setEnabled(False)
+
+        self.drag_start = self._to_image_coords(x, y)
+        self.drag_end = self.drag_start
+        self._update_document_frame()
+
+    def _on_document_drag(self, x, y):
+        if self.drag_start is None:
+            return
+        self.drag_end = self._to_image_coords(x, y)
+        self._update_document_frame()
+
+    def _on_document_release(self, x, y):
+        if self.drag_start is None:
+            return
+
+        self.drag_end = self._to_image_coords(x, y)
+
+        x1, y1 = self.drag_start
+        x2, y2 = self.drag_end
+
+        box = [min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)]
+
+        if self.draw_mode == "topic":
+            self.current_topic_box = box
+            self.save_topic_btn.setEnabled(True)
         elif self.draw_mode == "code":
-            if len(self.code_corners) >= 4:
-                return
-            self.code_corners.append([int((x - self.offset_x) * self.scale_x), int((y - self.offset_y) * self.scale_y)])
-            if len(self.code_corners) == 4:
-                self.save_code_btn.setEnabled(True)
-            self._update_document_frame()
+            self.pending_code_box = box
+            self.save_code_btn.setEnabled(True)
+
+        self.drag_start = None
+        self.drag_end = None
+        self._update_document_frame()
 
     def _update_document_frame(self):
         if self.warped_pixmap is None:
             return
-        
+
         pixmap = self.warped_pixmap.scaled(
             self.document_label.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -483,114 +534,123 @@ class MainWindow(QMainWindow):
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        def draw_quad(pts, color, label_text=""):
-            pen = QPen(color, 2)
-            painter.setPen(pen)
-            scaled = [(int((x / self.scale_x)), int((y / self.scale_y))) for x, y in pts]
-            for px, py in scaled:
-                painter.drawEllipse(px - 5, py - 5, 10, 10)
-            for i in range(len(scaled) - 1):
-                painter.drawLine(scaled[i][0], scaled[i][1], scaled[i+1][0], scaled[i+1][1])
-            if len(scaled) == 4:
-                painter.drawLine(scaled[3][0], scaled[3][1], scaled[0][0], scaled[0][1])
-                if label_text:
-                    font = QFont()
-                    font.setPointSize(10)
-                    font.setBold(True)
-                    painter.setFont(font)
-                    painter.setPen(QPen(color, 1))
-                    painter.drawText(scaled[0][0] + 4, scaled[0][1] + 16, label_text)
-        
-        for box in self.topic_boxes:
-            draw_quad(box["pts"], QColor(255, 140, 0)) #orange
-        
-        if self.current_topic_pts:
-            draw_quad(self.current_topic_pts, QColor(0, 255, 0))
-        
-        if self.code_corners:
-            draw_quad(self.code_corners, QColor(0, 0, 255))
-        
+        def draw_rect(box, color, label_text=""):
+            if box is None:
+                return
+            bx, by, bw, bh = box
+            dx = int(bx / self.scale_x)
+            dy = int(by / self.scale_y)
+            dw = int(bw / self.scale_x)
+            dh = int(bh / self.scale_y)
+
+            painter.setPen(QPen(color, 2))
+            painter.drawRect(dx, dy, dw, dh)
+
+            if label_text:
+                font = QFont()
+                font.setPointSize(10)
+                font.setBold(True)
+                painter.setFont(font)
+                painter.setPen(QPen(color, 1))
+                painter.drawText(dx + 4, dy + 16, label_text)
+
+        for tb in self.topic_boxes:
+            draw_rect(tb["box"], QColor(255, 140, 0), tb["label"])
+
+        draw_rect(self.current_topic_box, QColor(0, 255, 0))
+
+        draw_rect(self.code_box, QColor(0, 0, 255))
+        draw_rect(self.pending_code_box, QColor(0, 0, 255))
+
+        if self.drag_start and self.drag_end:
+            x1, y1 = self.drag_start
+            x2, y2 = self.drag_end
+            preview = [min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)]
+            preview_color = QColor(0, 255, 0) if self.draw_mode == "topic" else QColor(0, 0, 255)
+            draw_rect(preview, preview_color)
+
         painter.end()
         self.document_label.setPixmap(pixmap)
 
-    #PAGE 3
     def _scan_correct_ans(self):
         answers = self.extractor.scan_answers()
 
-        QMessageBox.information(self, "correct answers", "Atbildes:\n"+str(answers))
+        QMessageBox.information(self, "correct answers", "Atbildes:\n" + str(answers))
 
         self.scan_correct_ans.hide()
         self.rescan_btn.show()
         self.continue_to_test_btn.show()
 
-        #-------
-        #     
-
         with open(utils.getFilePath("answers.json"), "w") as f:
             json.dump(answers, f, indent=4)
             print("answers saved to file")
-        
-
-    #--------
-    # PAGE 4
-    #--------
 
     def _continue_to_test(self):
         self.stack.setCurrentIndex(4)
 
     def _test_scan(self):
-        
         if utils.dispensePage():
             answers = self.extractor.scan_answers()
-            QMessageBox.information(self, "scanned answers", "Atbildes:\n"+str(answers))
+            QMessageBox.information(self, "scanned answers", "Atbildes:\n" + str(answers))
         else:
-            QMessageBox.error(self,"ERROR","Failed to dispense test page, enter paper please or check printer")
-            
-
-        
-
+            QMessageBox.critical(
+                self, "ERROR",
+                "Failed to dispense test page, enter paper please or check printer"
+            )
 
     def _continue_to_full_scan(self):
         self.stack.setCurrentIndex(5)
 
-    #--------
-    # PAGE 5
-    #--------
-
     def _full_scan(self):
         self.full_scan_btn.hide()
- 
+
         while True:
-            
             if utils.dispensePage():
-                answers = self.extractor.scan_answers()
-                #pagaidam uztaisisu vnk ka converto uz json kas man ir settots checkAns, bet velak mos parrakstisu checkAns
-                
+                try:
+                    answers = self.extractor.scan_answers()
+                except Exception:
+                    continue
+
                 test = {
-                    "StudentID": answers.get("code", ""),
-                    "answers": {key: value for key, value in answers.items() if key != "code"}}
-        
+                    "studentID": answers.get("code", ""),
+                    "answers": {k: v for k, v in answers.items() if k != "code"},
+                }
+                print("temp structure, passing to Grade", test)
                 grades = checkAns.GradeTest(test)
+                print("graded:", grades)
                 utils.saveAnswers(grades)
-                
             else:
-                QMessageBox.information(self, "scanned answers", "Visas atbildes ir ieskenetas un saglabatas ...")
+                QMessageBox.information(
+                    self, "scanned answers",
+                    "Visas atbildes ir ieskenetas un saglabatas ..."
+                )
                 break
-
-            #IZDOMA KO DARIT AR ATBILDEM, SAGLABAT VAI UZ VIETAS PARBAUDA
-
-        #AFTER SCAN IS DONE
-        #SAVE ANSWERS
 
         self.close_btn.show()
 
 
-
-
-
 class CameraLabel(QLabel):
-    clicked = pyqtSignal(int, int)
+    clicked  = pyqtSignal(int, int)
+    pressed  = pyqtSignal(int, int)
+    dragged  = pyqtSignal(int, int)
+    released = pyqtSignal(int, int)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(int(event.position().x()), int(event.position().y()))
+            x, y = int(event.position().x()), int(event.position().y())
+            self.clicked.emit(x, y)
+            self.pressed.emit(x, y)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self.dragged.emit(
+                int(event.position().x()),
+                int(event.position().y()),
+            )
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.released.emit(
+                int(event.position().x()),
+                int(event.position().y()),
+            )
