@@ -6,3 +6,4 @@ torch
 torchvision
 pillow
 pyqt6
+matplotlib
