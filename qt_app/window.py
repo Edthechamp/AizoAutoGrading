@@ -2,7 +2,7 @@ from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QLabel, QLineEdit,
     QVBoxLayout, QWidget, QStackedWidget, QHBoxLayout,
-    QInputDialog, QMessageBox
+    QInputDialog, QMessageBox, QDialog
 )
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
 import cv2
@@ -51,12 +51,22 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
-        self.stack.addWidget(self._build_event_name_submit_page())
-        self.stack.addWidget(self._build_document_corner_draw_page())
-        self.stack.addWidget(self._build_topic_draw_page())
-        self.stack.addWidget(self._build_correct_ans_scan_page())
-        self.stack.addWidget(self._build_test_scan_page())
-        self.stack.addWidget(self._build_full_scan_page())
+
+        # PAGE INDICES:
+        # 0 - Event name submit
+        # 1 - Camera rotation         <-- NEW: rotation is now its own page before corner detection
+        # 2 - Document corner drawing
+        # 3 - Topic/code box drawing
+        # 4 - Correct answer scan
+        # 5 - Test scan
+        # 6 - Full scan
+        self.stack.addWidget(self._build_event_name_submit_page())   # 0
+        self.stack.addWidget(self._build_rotation_page())             # 1  NEW
+        self.stack.addWidget(self._build_document_corner_draw_page()) # 2
+        self.stack.addWidget(self._build_topic_draw_page())           # 3
+        self.stack.addWidget(self._build_correct_ans_scan_page())     # 4
+        self.stack.addWidget(self._build_test_scan_page())            # 5
+        self.stack.addWidget(self._build_full_scan_page())            # 6
 
         self.thread = camera_thread
         self.thread.frame_ready.connect(self._update_frame)
@@ -85,6 +95,40 @@ class MainWindow(QMainWindow):
         page.setLayout(layout)
         return page
 
+    # CHANGE: New dedicated rotation page added before corner detection.
+    # Previously the rotate button lived on the corner detection page, which made it
+    # easy to accidentally rotate after corners were already placed, wiping them.
+    # Now rotation is a separate step: user confirms rotation before drawing corners.
+    def _build_rotation_page(self):
+        page = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        btn_container = QWidget()
+        btn_container.setStyleSheet("background-color: #2b2b2b;")
+        btn_row = QHBoxLayout(btn_container)
+
+        self.rotate_btn = QPushButton("Pagriezt 90 gradi")
+        self.rotate_btn.clicked.connect(self._rotate_camera)
+
+        self.rotation_confirm_btn = QPushButton("Turpinat")
+        self.rotation_confirm_btn.clicked.connect(self._on_rotation_confirm)
+
+        btn_row.addWidget(self.rotate_btn)
+        btn_row.addWidget(self.rotation_confirm_btn)
+
+        # CHANGE: Separate camera label for rotation page.
+        # A QLabel widget can only have one parent, so we can't reuse camera_label here.
+        self.rotation_camera_label = CameraLabel("Gaida kameru...")
+        self.rotation_camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(btn_container, stretch=15)
+        layout.addWidget(self.rotation_camera_label, stretch=85)
+
+        page.setLayout(layout)
+        return page
+
     def _build_document_corner_draw_page(self):
         page = QWidget()
         layout = QVBoxLayout()
@@ -98,8 +142,7 @@ class MainWindow(QMainWindow):
         self.draw_btn = QPushButton("Atzimet dokumenta robezas")
         self.draw_btn.clicked.connect(self._document_draw_corners)
 
-        self.rotate_btn = QPushButton("Pagriezt 90°")
-        self.rotate_btn.clicked.connect(self._rotate_camera)
+        # CHANGE: rotate_btn removed from this page - it now lives on the rotation page.
 
         self.reset_btn = QPushButton("Izdzest atzimetos punktus")
         self.reset_btn.hide()
@@ -110,7 +153,6 @@ class MainWindow(QMainWindow):
         self.confirm_btn.clicked.connect(self._document_on_corner_submit)
 
         btn_row.addWidget(self.draw_btn)
-        btn_row.addWidget(self.rotate_btn)
         btn_row.addWidget(self.reset_btn)
         btn_row.addWidget(self.confirm_btn)
 
@@ -263,7 +305,7 @@ class MainWindow(QMainWindow):
         self.full_scan_btn = QPushButton("Veikt visu darbu skenesanu")
         self.full_scan_btn.clicked.connect(self._full_scan)
 
-        self.close_btn = QPushButton("Aizvērt")
+        self.close_btn = QPushButton("Aizvert")
         self.close_btn.hide()
         self.close_btn.clicked.connect(self.close)
 
@@ -279,8 +321,16 @@ class MainWindow(QMainWindow):
         if not event_name:
             return
         self.event_name = event_name
-        self.stack.setCurrentIndex(1)
+        # CHANGE: Now goes to rotation page (1) instead of corner page.
+        # Camera must be visible on the rotation page so the user can see the feed.
         self.is_camera_visible = True
+        self.stack.setCurrentIndex(1)
+
+    # CHANGE: New handler - confirms rotation and advances to corner detection.
+    # Resets any corners that may have been placed in a previous session.
+    def _on_rotation_confirm(self):
+        self.document_corners = []
+        self.stack.setCurrentIndex(2)
 
     def _update_frame(self, frame):
         if not self.is_camera_visible:
@@ -300,44 +350,66 @@ class MainWindow(QMainWindow):
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(qimg)
 
-        pixmap = pixmap.scaled(
-            self.camera_label.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation
-        )
-
-        self.offset_x = (self.camera_label.width() - pixmap.width()) / 2
-        self.offset_y = (self.camera_label.height() - pixmap.height()) / 2
-        self.scale_x = frame.shape[1] / pixmap.width()
-        self.scale_y = frame.shape[0] / pixmap.height()
-
-        painter = QPainter(pixmap)
-        painter.setPen(QPen(QColor(0, 255, 0), 3))
-
-        if self.document_corners:
-            pts = [(int(x / self.scale_x), int(y / self.scale_y))
-                   for x, y in self.document_corners]
-            for px, py in pts:
-                painter.drawEllipse(px - 6, py - 6, 12, 12)
-            for i in range(len(pts) - 1):
-                painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
-            if len(pts) == 4:
-                painter.drawLine(pts[3][0], pts[3][1], pts[0][0], pts[0][1])
-
-        painter.end()
-
         idx = self.stack.currentIndex()
+
+        # CHANGE: Rotation page (1) and corner page (2) both show camera but use
+        # different labels and target sizes for scaling.
         if idx == 1:
+            pixmap = pixmap.scaled(
+                self.rotation_camera_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation
+            )
+            self.rotation_camera_label.setPixmap(pixmap)
+            return  # No corner overlay needed on rotation page
+
+        if idx == 2:
+            pixmap = pixmap.scaled(
+                self.camera_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation
+            )
+            self.offset_x = (self.camera_label.width() - pixmap.width()) / 2
+            self.offset_y = (self.camera_label.height() - pixmap.height()) / 2
+            self.scale_x = frame.shape[1] / pixmap.width()
+            self.scale_y = frame.shape[0] / pixmap.height()
+
+            painter = QPainter(pixmap)
+            painter.setPen(QPen(QColor(0, 255, 0), 3))
+
+            if self.document_corners:
+                pts = [(int(x / self.scale_x), int(y / self.scale_y))
+                       for x, y in self.document_corners]
+                for px, py in pts:
+                    painter.drawEllipse(px - 6, py - 6, 12, 12)
+                for i in range(len(pts) - 1):
+                    painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+                if len(pts) == 4:
+                    painter.drawLine(pts[3][0], pts[3][1], pts[0][0], pts[0][1])
+
+            painter.end()
             self.camera_label.setPixmap(pixmap)
-        elif idx == 3:
-            self.scan_camera_label.setPixmap(pixmap)
+
+        # CHANGE: Indices updated from 3/4 to 4/5 because the rotation page shifted everything.
         elif idx == 4:
+            pixmap = pixmap.scaled(
+                self.scan_camera_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation
+            )
+            self.scan_camera_label.setPixmap(pixmap)
+        elif idx == 5:
+            pixmap = pixmap.scaled(
+                self.test_scan_camera_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation
+            )
             self.test_scan_camera_label.setPixmap(pixmap)
 
+    # CHANGE: _rotate_camera no longer clears document_corners because rotation
+    # now happens on its own page before any corners are drawn.
     def _rotate_camera(self):
         self.camera_rotation = (self.camera_rotation + 90) % 360
-        self.document_corners = []
-        self.confirm_btn.setEnabled(False)
 
     def _document_draw_corners(self):
         self.draw_btn.hide()
@@ -372,7 +444,8 @@ class MainWindow(QMainWindow):
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
         self.warped_pixmap = QPixmap.fromImage(qimg)
 
-        self.stack.setCurrentIndex(2)
+        # CHANGE: Index updated from 2 to 3 due to new rotation page.
+        self.stack.setCurrentIndex(3)
         self.is_camera_visible = False
         self._update_document_frame()
 
@@ -448,6 +521,12 @@ class MainWindow(QMainWindow):
         self.save_code_btn.hide()
         self._update_document_frame()
 
+        # CHANGE: If a code box was already saved previously, show continue button again.
+        # Without this, cancelling a redraw would hide the continue button permanently,
+        # leaving the user stuck with no way to proceed.
+        if self.code_box is not None:
+            self.continue_to_scan_btn.show()
+
     def _save_code(self):
         self.draw_mode = None
         self.code_box = self.pending_code_box
@@ -465,7 +544,8 @@ class MainWindow(QMainWindow):
             self.thread, self.document_corners, self.topic_boxes, self.code_box, self.camera_rotation
         )
         self.is_camera_visible = True
-        self.stack.setCurrentIndex(3)
+        # CHANGE: Index updated from 3 to 4 due to new rotation page.
+        self.stack.setCurrentIndex(4)
 
     def _to_image_coords(self, widget_x, widget_y):
         return (
@@ -554,13 +634,19 @@ class MainWindow(QMainWindow):
                 painter.setPen(QPen(color, 1))
                 painter.drawText(dx + 4, dy + 16, label_text)
 
-        for tb in self.topic_boxes:
+        for tb in (self.topic_boxes or []):
             draw_rect(tb["box"], QColor(255, 140, 0), tb["label"])
 
         draw_rect(self.current_topic_box, QColor(0, 255, 0))
 
-        draw_rect(self.code_box, QColor(0, 0, 255))
-        draw_rect(self.pending_code_box, QColor(0, 0, 255))
+        # CHANGE: Only draw code_box OR pending_code_box, not both.
+        # When pending_code_box is set the user is mid-draw, so show that.
+        # Once saved, pending_code_box is cleared and code_box is shown instead.
+        # Drawing both caused a double blue rectangle when redrawing the code box.
+        if self.pending_code_box is not None:
+            draw_rect(self.pending_code_box, QColor(0, 0, 255))
+        else:
+            draw_rect(self.code_box, QColor(0, 0, 255))
 
         if self.drag_start and self.drag_end:
             x1, y1 = self.drag_start
@@ -586,7 +672,8 @@ class MainWindow(QMainWindow):
             print("answers saved to file")
 
     def _continue_to_test(self):
-        self.stack.setCurrentIndex(4)
+        # CHANGE: Index updated from 4 to 5 due to new rotation page.
+        self.stack.setCurrentIndex(5)
 
     def _test_scan(self):
         if utils.dispensePage():
@@ -599,32 +686,70 @@ class MainWindow(QMainWindow):
             )
 
     def _continue_to_full_scan(self):
-        self.stack.setCurrentIndex(5)
+        # CHANGE: Index updated from 5 to 6 due to new rotation page.
+        self.stack.setCurrentIndex(6)
 
     def _full_scan(self):
         self.full_scan_btn.hide()
 
+        failed_scans = []
+
+        # CHANGE: The while loop now only handles dispensing and scanning.
+        # The failed_scans review loop and the "all done" message were previously
+        # INSIDE the while loop, meaning they ran after EVERY page dispense.
+        # They are now correctly placed after the loop exits.
         while True:
             if utils.dispensePage():
                 try:
-                    answers = self.extractor.scan_answers()
+                    success, answers = self.extractor.scan_answers()
                 except Exception:
                     continue
 
-                test = {
-                    "studentID": answers.get("code", ""),
-                    "answers": {k: v for k, v in answers.items() if k != "code"},
-                }
-                print("temp structure, passing to Grade", test)
-                grades = checkAns.GradeTest(test)
-                print("graded:", grades)
-                utils.saveAnswers(grades)
+                if success:
+                    test = {
+                        "studentID": answers.get("code", ""),
+                        "answers": {k: v for k, v in answers.items() if k != "code"},
+                    }
+                    print("temp structure, passing to Grade", test)
+                    grades = checkAns.GradeTest(test)
+                    print("graded:", grades)
+                    utils.saveAnswers(grades)
+                else:
+                    failed_scans.append(answers)
             else:
-                QMessageBox.information(
-                    self, "scanned answers",
-                    "Visas atbildes ir ieskenetas un saglabatas ..."
-                )
+                # No more pages - exit the scan loop
                 break
+
+        # CHANGE: Review of failed scans now happens after all pages are processed.
+        # Using fail.copy().items() to safely modify fail dict while iterating.
+        for fail in failed_scans:
+            for key, val in fail.copy().items():
+                if isinstance(val, tuple):  # Means this field had an error
+                    image, error = val
+                    if key == 'code':
+                        dialog = ReviewWindow(
+                            error,
+                            "Ievadi attela redzamo kodu ka vienkarshu skaitlu virkni -> 111111",
+                            image
+                        )
+                        dialog.exec()
+                        value = dialog.result or ""
+                        fail[key] = value.replace("-", "")
+                    else:
+                        dialog = ReviewWindow(
+                            error,
+                            "Ievadi attela redzamas pareizas atbildes ka burtu virkni -> ABCDABCD ; Ja kada atbilde nav atzimeta, liec atstarpi -> ABCD BCD",
+                            image
+                        )
+                        dialog.exec()
+                        value = dialog.result or ""
+                        fail[key] = {str(i + 1): (char.upper() if char != ' ' else '') for i, char in enumerate(value)}
+
+        # CHANGE: "All done" message now shows once, after everything is processed.
+        QMessageBox.information(
+            self, "scanned answers",
+            "Visas atbildes ir saglabatas! Tagad var aizvert logu"
+        )
 
         self.close_btn.show()
 
@@ -654,3 +779,43 @@ class CameraLabel(QLabel):
                 int(event.position().x()),
                 int(event.position().y()),
             )
+
+
+class ReviewWindow(QDialog):
+    # CHANGE: Removed unused `input_text` parameter. The call sites were passing
+    # (error, info_text, image) - 3 args - but the old signature expected 4,
+    # meaning `image` was landing in `input_text` and the actual image arg was missing,
+    # which would cause _numpy_to_pixmap to crash receiving a string instead of an array.
+    def __init__(self, error: str, info_text: str, image: np.ndarray):
+        super().__init__()
+        self.result = None
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel(error))
+        layout.addWidget(QLabel(info_text))
+
+        img_label = QLabel()
+        img_label.setPixmap(self._numpy_to_pixmap(image))
+        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(img_label)
+
+        self.input = QLineEdit()
+        self.input.setPlaceholderText("Ievadi tekstu seit..")
+        layout.addWidget(self.input)
+
+        btn = QPushButton("Iesniegt")
+        btn.clicked.connect(self.on_submit)
+        layout.addWidget(btn)
+
+    def _numpy_to_pixmap(self, arr: np.ndarray) -> QPixmap:
+        # ascontiguousarray ensures the buffer is laid out contiguously in memory.
+        # Non-contiguous arrays (e.g. slices) would produce corrupted images.
+        arr = np.ascontiguousarray(arr)
+        h, w, ch = arr.shape
+        img = QImage(arr.data, w, h, ch * w, QImage.Format.Format_RGB888)
+        return QPixmap.fromImage(img)
+
+    def on_submit(self):
+        self.result = self.input.text()
+        self.accept()

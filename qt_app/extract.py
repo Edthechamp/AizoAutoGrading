@@ -17,7 +17,14 @@ class Extractor():
         self.camera_rotation = camera_rotation
     
     def scan_answers(self):
+        """
+        return (success, scanned_document)
+        successful run: (True, {'code': '123456', ...}})
+        error run: (False, {'code':(error_img, error)})
+        """
+
         frame = self.camera.latest_frame
+        success = True # whether the scanning was successful or not
 
         if self.camera_rotation == 90:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
@@ -40,12 +47,17 @@ class Extractor():
         cx, cy, cw, ch = self.code_box
         code_area = gray[cy:cy+ch, cx:cx+cw]
 
-        scanned_code = self.get_code(code_area)
+        try:
+            scanned_code = self.get_code(code_area)
+        except Exception as e:
+            success = False
+            scanned_document['code'] = (code_area, str(e))
+            
         if len(scanned_code) == 6:
             scanned_document['code'] = scanned_code
         else:
-            print("error detecting code")
-            return
+            success = False
+            scanned_document['code'] = (code_area, "Code is not 6 digits long")
 
         #extract answers
         for box in self.topic_boxes:
@@ -53,160 +65,168 @@ class Extractor():
             box_label = box["label"]
 
             box_img = gray[by:by+bh, bx:bx+bw]
-            result = self.detect_answers(box_img)
-            scanned_document[box_label] = result
-        
-        print(scanned_document)
+            try:
+                result = self.detect_answers(box_img)
+                scanned_document[box_label] = result
+            except Exception as e:
+                success = False
+                scanned_document[box_label] = (box_img, str(e))
     
-        return scanned_document
+        return success, scanned_document
+    
 
 
     
     def get_code(self, gray):
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        try:
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-        #debug = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-
-
-        # Detect boxes in img
-
-        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
-        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
-
-        # Opening = erode then dilate
-        # Erode kills anything shorter than the kernel, dilate restores what survived
-        h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
-        v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)
+            #debug = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
 
 
-        # Because kernel is thin, it detects multiple lines per actual box line, making it appear thick.
-        # This makes each detected vertical line only 1 pixel wide
-        contours, _ = cv2.findContours(v_lines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) 
-        v_lines_1px = np.zeros_like(v_lines)
-        for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            center_x = x + (w // 2)
-            cv2.line(v_lines_1px, (center_x, y), (center_x, y + h), 255, 1)
+            # Detect boxes in img
 
-        v_lines = v_lines_1px
+            h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
+            v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
 
+            # Opening = erode then dilate
+            # Erode kills anything shorter than the kernel, dilate restores what survived
+            h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
+            v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)
 
 
-
-        #cv2.imshow('vertical only', v_lines) 
-        #cv2.waitKey(0)
-        #cv2.destroyAllWindows()
-
-        col_proj = np.sum(v_lines, axis=0)
-
-        from scipy.ndimage import uniform_filter1d
-        from scipy.signal import find_peaks
-
-        col_proj_smooth = uniform_filter1d(col_proj.astype(float), size=3)
-
-        col_peaks, _ = find_peaks(
-            col_proj_smooth,
-            height=np.max(col_proj_smooth) * 0.8,
-            distance=3
-        )
-
-    
-        #import matplotlib.pyplot as plt
-
-        #plt.figure(figsize=(15, 4))
-        #plt.plot(col_proj_smooth)
-        #plt.scatter(col_peaks, col_proj_smooth[col_peaks], color='green', zorder=5, label='detected peaks')
-        #plt.axhline(np.max(col_proj_smooth) * 0.8, color='red', linestyle='--', label='height threshold')
-        #plt.xlabel('column index')
-        #plt.legend()
-        #plt.show()
-
-        boxes_x = [(col_peaks[i], col_peaks[i+1]) for i in range(0, len(col_peaks) - 1, 2)]
-
-        if len(boxes_x) % 2 != 0:
-            print("Error detecting box lines: not an even number!")
-            return
-    
-        boxes = []
-
-        for (x_left, x_right) in boxes_x:
-            strip = h_lines[:, x_left:x_right]
-            strip_proj = np.sum(strip, axis=1)
-
-            strip_proj_smooth = uniform_filter1d(strip_proj.astype(float), size=3)
-            row_peaks, _ = find_peaks(
-                strip_proj_smooth,
-                height=np.max(strip_proj_smooth) * 0.3,
-                distance=20)
-
-            if len(row_peaks) < 2:
-                print(f"Warning: only found {len(row_peaks)} row peaks for strip x={x_left}..{x_right}, skipping")
-                continue
-
-            row_peaks = np.sort(row_peaks[np.argsort(strip_proj_smooth[row_peaks])[-2:]])
-
-
-            y_top, y_bot = row_peaks[0], row_peaks[-1]
-
-            boxes.append((x_left, y_top, x_right-x_left, y_bot-y_top))
-    
-            #cv2.rectangle(debug, (x_left, y_top), (x_right, y_bot), (0, 255, 0), 3)
-
-
-        #Detect handwritten digits
-
-        h, w = gray.shape
-
-        box_images = []
-        for box in boxes:
-            y_pad = 10
-            x_pad = 5
-            box_img = binary[max(box[1] - y_pad, 0): min(box[1] + box[3] + y_pad, h), max(box[0] - x_pad, 0):min(box[0] + box[2] + x_pad, w)]
-            box_img_gray = gray[max(box[1] - y_pad, 0): min(box[1] + box[3] + y_pad, h), max(box[0] - x_pad, 0):min(box[0] + box[2] + x_pad, w)]
-
-            contours, _ = cv2.findContours(box_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-            mask = np.zeros(box_img.shape, dtype=np.uint8)
-
+            # Because kernel is thin, it detects multiple lines per actual box line, making it appear thick.
+            # This makes each detected vertical line only 1 pixel wide
+            contours, _ = cv2.findContours(v_lines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) 
+            v_lines_1px = np.zeros_like(v_lines)
             for cnt in contours:
-                cv2.drawContours(mask, [cnt], -1, 255, 4)
+                x, y, w, h = cv2.boundingRect(cnt)
+                center_x = x + (w // 2)
+                cv2.line(v_lines_1px, (center_x, y), (center_x, y + h), 255, 1)
 
-            box_img_gray[mask == 255] = 255
+            v_lines = v_lines_1px
 
-            by, bx = box_img_gray.shape
-            extra_pad = 3
-            box_img_gray = box_img_gray[y_pad + extra_pad:by - y_pad - extra_pad, x_pad + extra_pad: bx - x_pad - extra_pad]
 
-            box_img_gray = cv2.GaussianBlur(box_img_gray, (3, 3), 0)
 
-            box_img_gray = cv2.adaptiveThreshold(
-                box_img_gray,
-                255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,  # uses weighted gaussian neighbourhood, better than MEAN for noisy images
-                cv2.THRESH_BINARY,
-                blockSize=21,   
-                C=6    
+
+            #cv2.imshow('vertical only', v_lines) 
+            #cv2.waitKey(0)
+            #cv2.destroyAllWindows()
+
+            col_proj = np.sum(v_lines, axis=0)
+
+            from scipy.ndimage import uniform_filter1d
+            from scipy.signal import find_peaks
+
+            col_proj_smooth = uniform_filter1d(col_proj.astype(float), size=3)
+
+            col_peaks, _ = find_peaks(
+                col_proj_smooth,
+                height=np.max(col_proj_smooth) * 0.8,
+                distance=3
             )
 
+        
+            #import matplotlib.pyplot as plt
 
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-            box_img_gray = cv2.morphologyEx(box_img_gray, cv2.MORPH_OPEN, kernel)
+            #plt.figure(figsize=(15, 4))
+            #plt.plot(col_proj_smooth)
+            #plt.scatter(col_peaks, col_proj_smooth[col_peaks], color='green', zorder=5, label='detected peaks')
+            #plt.axhline(np.max(col_proj_smooth) * 0.8, color='red', linestyle='--', label='height threshold')
+            #plt.xlabel('column index')
+            #plt.legend()
+            #plt.show()
 
-            box_final = cv2.bitwise_not(box_img_gray) #lets see if this works
-            box_images.append(box_final)
+            boxes_x = [(col_peaks[i], col_peaks[i+1]) for i in range(0, len(col_peaks) - 1, 2)]
+
+            if len(boxes_x) % 2 != 0:
+                raise RuntimeError("Error detecting box lines: not an even number!")
+        
+            boxes = []
+
+            for (x_left, x_right) in boxes_x:
+                strip = h_lines[:, x_left:x_right]
+                strip_proj = np.sum(strip, axis=1)
+
+                strip_proj_smooth = uniform_filter1d(strip_proj.astype(float), size=3)
+                row_peaks, _ = find_peaks(
+                    strip_proj_smooth,
+                    height=np.max(strip_proj_smooth) * 0.3,
+                    distance=20)
+
+                if len(row_peaks) < 2:
+                    raise RuntimeError(f"Warning: only found {len(row_peaks)} row peaks for strip x={x_left}..{x_right}, skipping")
+
+                row_peaks = np.sort(row_peaks[np.argsort(strip_proj_smooth[row_peaks])[-2:]])
 
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = Extractor.load_model("emnist_trained.pth", device)
+                y_top, y_bot = row_peaks[0], row_peaks[-1]
 
-        code_digits = []
-        for img in box_images:  # sort left to right
-            cv2.imshow('box_img', img)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-            digit, confidence = Extractor.predict(img, model, device)
-            print("plis", digit, confidence)
-            code_digits.append(str(digit))
+                boxes.append((x_left, y_top, x_right-x_left, y_bot-y_top))
+        
+                #cv2.rectangle(debug, (x_left, y_top), (x_right, y_bot), (0, 255, 0), 3)
+
+        except Exception as e:
+            raise RuntimeError(f"error detecting code boxes {e}")
+        
+        #Detect handwritten digits
+        try:
+            h, w = gray.shape
+
+            box_images = []
+            for box in boxes:
+                y_pad = 10
+                x_pad = 5
+                box_img = binary[max(box[1] - y_pad, 0): min(box[1] + box[3] + y_pad, h), max(box[0] - x_pad, 0):min(box[0] + box[2] + x_pad, w)]
+                box_img_gray = gray[max(box[1] - y_pad, 0): min(box[1] + box[3] + y_pad, h), max(box[0] - x_pad, 0):min(box[0] + box[2] + x_pad, w)]
+
+                contours, _ = cv2.findContours(box_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+                mask = np.zeros(box_img.shape, dtype=np.uint8)
+
+                for cnt in contours:
+                    cv2.drawContours(mask, [cnt], -1, 255, 4)
+
+                box_img_gray[mask == 255] = 255
+
+                by, bx = box_img_gray.shape
+                extra_pad = 3
+                box_img_gray = box_img_gray[y_pad + extra_pad:by - y_pad - extra_pad, x_pad + extra_pad: bx - x_pad - extra_pad]
+
+                box_img_gray = cv2.GaussianBlur(box_img_gray, (3, 3), 0)
+
+                box_img_gray = cv2.adaptiveThreshold(
+                    box_img_gray,
+                    255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,  # uses weighted gaussian neighbourhood, better than MEAN for noisy images
+                    cv2.THRESH_BINARY,
+                    blockSize=21,   
+                    C=6    
+                )
+
+
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+                box_img_gray = cv2.morphologyEx(box_img_gray, cv2.MORPH_OPEN, kernel)
+
+                box_final = cv2.bitwise_not(box_img_gray)
+                box_images.append(box_final)
+
+
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model = Extractor.load_model("emnist_trained.pth", device)
+
+            code_digits = []
+            for img in box_images:  # sort left to right
+                cv2.imshow('box_img', img)
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+                digit, confidence = Extractor.predict(img, model, device)
+                if confidence < 0.8:
+                    raise RuntimeError("Error detecting digits, confidence too low {confidence}")
+                code_digits.append(str(digit))
+        
+        except Exception as e:
+            raise RuntimeError(f"Error while detecting digits {e}")
 
         return ''.join(code_digits)
 
@@ -355,9 +375,12 @@ class Extractor():
 
                     roi = gray[int(cy - avg_height / 2):int(cy + avg_height / 2), int(cx - avg_width / 2):int(cx + avg_width / 2)]
                     fill_ratios.append(1.0 - np.mean(roi) / 255.0)
+                
 
-                best = int(np.argmax(fill_ratios))
-                if fill_ratios[best] < 0.3:
+                sorted_ratios = np.sort(fill_ratios)[::-1] #sorted descending
+                best = sorted_ratios[0]
+                lowest = sorted_ratios[-1]
+                if best < 1.5 * lowest or best < 1.1 * sorted_ratios[1]:
                     answers[str(current_question)] = ""
                 else:
                     answers[str(current_question)] = "ABCDEF"[best]
