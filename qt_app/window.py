@@ -54,7 +54,7 @@ class MainWindow(QMainWindow):
 
         # PAGE INDICES:
         # 0 - Event name submit
-        # 1 - Camera rotation         <-- NEW: rotation is now its own page before corner detection
+        # 1 - Camera rotation
         # 2 - Document corner drawing
         # 3 - Topic/code box drawing
         # 4 - Correct answer scan
@@ -94,11 +94,7 @@ class MainWindow(QMainWindow):
 
         page.setLayout(layout)
         return page
-
-    # CHANGE: New dedicated rotation page added before corner detection.
-    # Previously the rotate button lived on the corner detection page, which made it
-    # easy to accidentally rotate after corners were already placed, wiping them.
-    # Now rotation is a separate step: user confirms rotation before drawing corners.
+    
     def _build_rotation_page(self):
         page = QWidget()
         layout = QVBoxLayout()
@@ -118,8 +114,6 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self.rotate_btn)
         btn_row.addWidget(self.rotation_confirm_btn)
 
-        # CHANGE: Separate camera label for rotation page.
-        # A QLabel widget can only have one parent, so we can't reuse camera_label here.
         self.rotation_camera_label = CameraLabel("Gaida kameru...")
         self.rotation_camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -141,8 +135,6 @@ class MainWindow(QMainWindow):
 
         self.draw_btn = QPushButton("Atzimet dokumenta robezas")
         self.draw_btn.clicked.connect(self._document_draw_corners)
-
-        # CHANGE: rotate_btn removed from this page - it now lives on the rotation page.
 
         self.reset_btn = QPushButton("Izdzest atzimetos punktus")
         self.reset_btn.hide()
@@ -321,13 +313,9 @@ class MainWindow(QMainWindow):
         if not event_name:
             return
         self.event_name = event_name
-        # CHANGE: Now goes to rotation page (1) instead of corner page.
-        # Camera must be visible on the rotation page so the user can see the feed.
         self.is_camera_visible = True
         self.stack.setCurrentIndex(1)
 
-    # CHANGE: New handler - confirms rotation and advances to corner detection.
-    # Resets any corners that may have been placed in a previous session.
     def _on_rotation_confirm(self):
         self.document_corners = []
         self.stack.setCurrentIndex(2)
@@ -352,8 +340,6 @@ class MainWindow(QMainWindow):
 
         idx = self.stack.currentIndex()
 
-        # CHANGE: Rotation page (1) and corner page (2) both show camera but use
-        # different labels and target sizes for scaling.
         if idx == 1:
             pixmap = pixmap.scaled(
                 self.rotation_camera_label.size(),
@@ -390,7 +376,6 @@ class MainWindow(QMainWindow):
             painter.end()
             self.camera_label.setPixmap(pixmap)
 
-        # CHANGE: Indices updated from 3/4 to 4/5 because the rotation page shifted everything.
         elif idx == 4:
             pixmap = pixmap.scaled(
                 self.scan_camera_label.size(),
@@ -406,8 +391,6 @@ class MainWindow(QMainWindow):
             )
             self.test_scan_camera_label.setPixmap(pixmap)
 
-    # CHANGE: _rotate_camera no longer clears document_corners because rotation
-    # now happens on its own page before any corners are drawn.
     def _rotate_camera(self):
         self.camera_rotation = (self.camera_rotation + 90) % 360
 
@@ -444,7 +427,6 @@ class MainWindow(QMainWindow):
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
         self.warped_pixmap = QPixmap.fromImage(qimg)
 
-        # CHANGE: Index updated from 2 to 3 due to new rotation page.
         self.stack.setCurrentIndex(3)
         self.is_camera_visible = False
         self._update_document_frame()
@@ -521,9 +503,6 @@ class MainWindow(QMainWindow):
         self.save_code_btn.hide()
         self._update_document_frame()
 
-        # CHANGE: If a code box was already saved previously, show continue button again.
-        # Without this, cancelling a redraw would hide the continue button permanently,
-        # leaving the user stuck with no way to proceed.
         if self.code_box is not None:
             self.continue_to_scan_btn.show()
 
@@ -544,7 +523,6 @@ class MainWindow(QMainWindow):
             self.thread, self.document_corners, self.topic_boxes, self.code_box, self.camera_rotation
         )
         self.is_camera_visible = True
-        # CHANGE: Index updated from 3 to 4 due to new rotation page.
         self.stack.setCurrentIndex(4)
 
     def _to_image_coords(self, widget_x, widget_y):
@@ -639,10 +617,6 @@ class MainWindow(QMainWindow):
 
         draw_rect(self.current_topic_box, QColor(0, 255, 0))
 
-        # CHANGE: Only draw code_box OR pending_code_box, not both.
-        # When pending_code_box is set the user is mid-draw, so show that.
-        # Once saved, pending_code_box is cleared and code_box is shown instead.
-        # Drawing both caused a double blue rectangle when redrawing the code box.
         if self.pending_code_box is not None:
             draw_rect(self.pending_code_box, QColor(0, 0, 255))
         else:
@@ -672,7 +646,6 @@ class MainWindow(QMainWindow):
             print("answers saved to file")
 
     def _continue_to_test(self):
-        # CHANGE: Index updated from 4 to 5 due to new rotation page.
         self.stack.setCurrentIndex(5)
 
     def _test_scan(self):
@@ -686,7 +659,6 @@ class MainWindow(QMainWindow):
             )
 
     def _continue_to_full_scan(self):
-        # CHANGE: Index updated from 5 to 6 due to new rotation page.
         self.stack.setCurrentIndex(6)
 
     def _full_scan(self):
@@ -694,16 +666,9 @@ class MainWindow(QMainWindow):
 
         failed_scans = []
 
-        # CHANGE: The while loop now only handles dispensing and scanning.
-        # The failed_scans review loop and the "all done" message were previously
-        # INSIDE the while loop, meaning they ran after EVERY page dispense.
-        # They are now correctly placed after the loop exits.
         while True:
             if utils.dispensePage():
-                try:
-                    success, answers = self.extractor.scan_answers()
-                except Exception:
-                    continue
+                success, answers = self.extractor.scan_answers()
 
                 if success:
                     test = {
@@ -720,8 +685,6 @@ class MainWindow(QMainWindow):
                 # No more pages - exit the scan loop
                 break
 
-        # CHANGE: Review of failed scans now happens after all pages are processed.
-        # Using fail.copy().items() to safely modify fail dict while iterating.
         for fail in failed_scans:
             for key, val in fail.copy().items():
                 if isinstance(val, tuple):  # Means this field had an error
@@ -729,7 +692,7 @@ class MainWindow(QMainWindow):
                     if key == 'code':
                         dialog = ReviewWindow(
                             error,
-                            "Ievadi attela redzamo kodu ka vienkarshu skaitlu virkni -> 111111",
+                            "Ievadi attēlā redzamo kodu kā vienkaršu skaitļu virkni -> 111111",
                             image
                         )
                         dialog.exec()
@@ -738,17 +701,18 @@ class MainWindow(QMainWindow):
                     else:
                         dialog = ReviewWindow(
                             error,
-                            "Ievadi attela redzamas pareizas atbildes ka burtu virkni -> ABCDABCD ; Ja kada atbilde nav atzimeta, liec atstarpi -> ABCD BCD",
+                            "Ievadi attēlā redzamās pareizās atbildes kā burtu virkni -> ABCDABCD ; Ja kāda atbilde nav atzīmeta, liec atstarpi -> ABCD BCD",
                             image
                         )
                         dialog.exec()
                         value = dialog.result or ""
                         fail[key] = {str(i + 1): (char.upper() if char != ' ' else '') for i, char in enumerate(value)}
+        
+        #TODO FOR MAZERS: tagad vajag saglabat ari atbildes no fail!!!!!!!
 
-        # CHANGE: "All done" message now shows once, after everything is processed.
         QMessageBox.information(
             self, "scanned answers",
-            "Visas atbildes ir saglabatas! Tagad var aizvert logu"
+            "Visas atbildes ir saglabātas! Tagad var aizvērt logu"
         )
 
         self.close_btn.show()
@@ -782,10 +746,6 @@ class CameraLabel(QLabel):
 
 
 class ReviewWindow(QDialog):
-    # CHANGE: Removed unused `input_text` parameter. The call sites were passing
-    # (error, info_text, image) - 3 args - but the old signature expected 4,
-    # meaning `image` was landing in `input_text` and the actual image arg was missing,
-    # which would cause _numpy_to_pixmap to crash receiving a string instead of an array.
     def __init__(self, error: str, info_text: str, image: np.ndarray):
         super().__init__()
         self.result = None
