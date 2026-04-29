@@ -633,7 +633,13 @@ class MainWindow(QMainWindow):
         self.document_label.setPixmap(pixmap)
 
     def _scan_correct_ans(self):
-        answers = self.extractor.scan_answers()
+        success, answers = self.extractor.scan_answers()
+        if not success:
+            QMessageBox.critical(
+                self, "ERROR",
+                "Neizdevas noskenet atbiles, megini velreiz"
+            )
+            return
 
         QMessageBox.information(self, "correct answers", "Atbildes:\n" + str(answers))
 
@@ -651,6 +657,12 @@ class MainWindow(QMainWindow):
     def _test_scan(self):
         if utils.dispensePage():
             answers = self.extractor.scan_answers()
+            if not success:
+            QMessageBox.critical(
+                self, "ERROR",
+                "Neizdevas noskenet atbiles, megini velreiz"
+            )
+            return
             QMessageBox.information(self, "scanned answers", "Atbildes:\n" + str(answers))
         else:
             QMessageBox.critical(
