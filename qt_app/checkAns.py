@@ -53,3 +53,14 @@ def GradeTest(test):
     #TODO:write to sql or atleast something permanent, both grade and answers
 
     return {"code":test['studentID'],"scores":grades}
+
+
+
+def DemoTest(answers):
+    correct = {"1":"A","2":"B","3":"C","4":"C","5":"A"}
+    score=0
+    for i in range(5):
+        if answers['jaut'][str(i+1)]==correct[str(i+1)]:
+            score+=1
+    return score
+           

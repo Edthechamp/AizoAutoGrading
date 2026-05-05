@@ -49,15 +49,15 @@ class Extractor():
 
         try:
             scanned_code = self.get_code(code_area)
+
+            if len(scanned_code) == 6:
+                scanned_document['code'] = scanned_code
+            else:
+                success = False
+                scanned_document['code'] = (code_area, "Code is not 6 digits long")
         except Exception as e:
             success = False
             scanned_document['code'] = (code_area, str(e))
-            
-        if len(scanned_code) == 6:
-            scanned_document['code'] = scanned_code
-        else:
-            success = False
-            scanned_document['code'] = (code_area, "Code is not 6 digits long")
 
         #extract answers
         for box in self.topic_boxes:
@@ -217,11 +217,8 @@ class Extractor():
 
             code_digits = []
             for img in box_images:  # sort left to right
-                cv2.imshow('box_img', img)
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
                 digit, confidence = Extractor.predict(img, model, device)
-                if confidence < 0.8:
+                if confidence < 0.1:
                     raise RuntimeError("Error detecting digits, confidence too low {confidence}")
                 code_digits.append(str(digit))
         
@@ -380,10 +377,10 @@ class Extractor():
                 sorted_ratios = np.sort(fill_ratios)[::-1] #sorted descending
                 best = sorted_ratios[0]
                 lowest = sorted_ratios[-1]
-                if best < 1.5 * lowest or best < 1.1 * sorted_ratios[1]:
-                    answers[str(current_question)] = ""
-                else:
-                    answers[str(current_question)] = "ABCDEF"[best]
+                #if best < 1.5 * lowest or best < 1.1 * sorted_ratios[1]:
+                    #answers[str(current_question)] = ""
+                #else:
+                answers[str(current_question)] = "ABCDEF"[np.argmax(fill_ratios)]
                 current_question += 1
 
 

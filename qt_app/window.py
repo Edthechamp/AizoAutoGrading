@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
     def __init__(self, camera_thread):
         super().__init__()
         self.setWindowTitle("Labotajs")
-        self.setFixedSize(QSize(1600, 900))
+        self.setFixedSize(QSize(1067, 600))
 
         self.event_name = ""
 
@@ -637,7 +637,7 @@ class MainWindow(QMainWindow):
         if not success:
             QMessageBox.critical(
                 self, "ERROR",
-                "Neizdevas noskenet atbiles, megini velreiz"
+                "Neizdevas noskenet atbiles, megini velreiz" + str(answers)
             )
             return
 
@@ -655,15 +655,20 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(5)
 
     def _test_scan(self):
+        import time
         if utils.dispensePage():
-            answers = self.extractor.scan_answers()
+            print("got True from utils Print")
+            print(self.extractor.scan_answers())
+            time.sleep(1)
+            success, answers = self.extractor.scan_answers()
             if not success:
-            QMessageBox.critical(
-                self, "ERROR",
-                "Neizdevas noskenet atbiles, megini velreiz"
-            )
-            return
-            QMessageBox.information(self, "scanned answers", "Atbildes:\n" + str(answers))
+                QMessageBox.critical(
+                    self, "ERROR",
+                    "Neizdevas noskenet atbiles, megini velreiz"
+                )
+                return
+            QMessageBox.information(self, "scanned answers", "Atbildes:\n" + str(answers) + "\nTest Score: " + str(checkAns.DemoTest(answers)) + " out of 5")
+       
         else:
             QMessageBox.critical(
                 self, "ERROR",

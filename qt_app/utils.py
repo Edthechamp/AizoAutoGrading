@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 import sqlite3
 import time
+import platform
 
 
 #TODO: create database table where to save student asnwers
@@ -18,15 +19,31 @@ cursor.execute('''
     )
 ''')
 
+def printWindows():
+     
+    subprocess.run(
+    ["powershell", "-Command", "$input | Out-Printer -Name 'Dispenser'"],
+    input="\f",
+    text=True,
+    capture_output=True)
+
 
 def dispensePage(timeout=25):
 
+    if platform.system() == "Windows":
+        print("windows prints")
+        printWindows()
+        time.sleep(25)
+        print("print done returning True")
+        return True
+    
     result = subprocess.run(
         ["lp", "-d", "Dispenser"], 
         input="\f", 
         text=True, 
         capture_output=True
     )
+
 
     if result.returncode != 0:
         print(f"Genuine hz kam janotiek lai butu sads error")
